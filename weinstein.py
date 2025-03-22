@@ -43,6 +43,7 @@ class WeinsteinTickerAnalyzer:
         self.errors = []
         self.warnings = []
         self.ticker_info = {}
+        self.backtest_results = None
         
     def load_data(self, ticker, period="1y", interval="1wk"):
         """Load data for a specific ticker with enhanced error handling"""
@@ -63,6 +64,7 @@ class WeinsteinTickerAnalyzer:
         self.market_context = None
         self.sector_data = None
         self.support_resistance_levels = []
+        self.backtest_results = None
         
         try:
             # Normalize ticker
@@ -189,6 +191,21 @@ class WeinsteinTickerAnalyzer:
             
             # Generate detailed analysis text
             self.generate_detailed_analysis()
+            
+            # Perform backtest automatically
+            # Only if we have enough data (30+ data points is ideal)
+            if len(self.data) >= 30:
+                self.backtest_results = self.perform_simplified_backtest()
+                if self.backtest_results["success"]:
+                    logger.info(f"Backtest completed automatically with {self.backtest_results['total_trades']} trades")
+                else:
+                    logger.warning(f"Automatic backtest failed: {self.backtest_results.get('error', 'Unknown error')}")
+            else:
+                self.backtest_results = {
+                    "success": False,
+                    "error": f"Insufficient data for backtest. Need at least 30 data points, found {len(self.data)}."
+                }
+                logger.warning(f"Not enough data for automatic backtest: {len(self.data)} data points")
             
             logger.info(f"Successfully loaded and analyzed data for {ticker}")
             return True
@@ -1981,8 +1998,7 @@ class WeinsteinTickerAnalyzer:
             # Calculate volume for each price bin with enhanced method
             volume_by_price = {}
             
-            # Distribute volume across the high-low range for each bar
-            for i, row in valid_data.iterrows():
+for i, row in valid_data.iterrows():
                 bar_low = row['Low']
                 bar_high = row['High']
                 bar_volume = row['Volume']
@@ -2969,7 +2985,7 @@ def main():
                 else:
                     st.info("No detailed analysis available.")
             
-            # Display backtest results in sixth tab
+            # Display backtest results in sixth tab - now automatically calculated
             with tabs[5]:
                 st.subheader("Weinstein-Strategie Backtest")
                 
@@ -2983,104 +2999,101 @@ def main():
                 - Stop-Loss: 7% unter Einstiegspreis (wird angehoben, wenn Position 10% im Gewinn)
                 """)
                 
-                # Einfacher Button zum Ausführen des Backtests
-                run_backtest = st.button(
-                    "Backtest durchführen",
-                    type="primary",
-                    use_container_width=True
-                )
-                
-                if run_backtest:
-                    with st.spinner("Führe Backtest durch..."):
-                        # Führe den vereinfachten Backtest aus
-                        backtest_results = analyzer.perform_simplified_backtest()
-                        
-                        if backtest_results["success"]:
-                            # Erzeuge Backtest-Charts
-                            equity_chart, metrics_chart = analyzer.create_simplified_backtest_charts(backtest_results)
+                # Zeige Backtest-Ergebnisse, falls vorhanden
+                if analyzer.backtest_results and analyzer.backtest_results["success"]:
+                    backtest_results = analyzer.backtest_results
+                    
+                    # Erzeuge Backtest-Charts
+                    equity_chart, metrics_chart = analyzer.create_simplified_backtest_charts(backtest_results)
+                    
+                    # Zeige Performance-Metriken
+                    st.plotly_chart(metrics_chart, use_container_width=True)
+                    
+                    # Zeige Strategie-Vergleich
+                    strategy_return = backtest_results["total_return_pct"]
+                    buy_hold_return = backtest_results["buy_hold_return_pct"]
+                    strategy_color = "green" if strategy_return > buy_hold_return else "red"
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric(
+                            "Strategie-Rendite",
+                            f"{strategy_return:.2f}%",
+                            f"{strategy_return - buy_hold_return:.2f}% ggü. Buy & Hold",
+                            delta_color=strategy_color
+                        )
+                    
+                    with col2:
+                        st.metric(
+                            "Buy & Hold Rendite",
+                            f"{buy_hold_return:.2f}%"
+                        )
+                    
+                    with col3:
+                        st.metric(
+                            "Max. Drawdown",
+                            f"{backtest_results['max_drawdown_pct']:.2f}%"
+                        )
+                    
+                    # Zeige Equity-Kurve
+                    st.subheader("Equity-Kurve und Trades")
+                    st.plotly_chart(equity_chart, use_container_width=True)
+                    
+                    # Zeige Trade-Historie in aufklappbarem Bereich
+                    with st.expander("Trade-Historie"):
+                        # Konvertiere Trade-Historie in DataFrame zur Anzeige
+                        if backtest_results["trades"]:
+                            trade_df = pd.DataFrame(backtest_results["trades"])
                             
-                            # Zeige Performance-Metriken
-                            st.plotly_chart(metrics_chart, use_container_width=True)
+                            # Formatiere Spalten
+                            trade_df["Einstiegsdatum"] = pd.to_datetime(trade_df["Einstiegsdatum"])
+                            trade_df["Ausstiegsdatum"] = pd.to_datetime(trade_df["Ausstiegsdatum"])
                             
-                            # Zeige Strategie-Vergleich
-                            strategy_return = backtest_results["total_return_pct"]
-                            buy_hold_return = backtest_results["buy_hold_return_pct"]
-                            strategy_color = "green" if strategy_return > buy_hold_return else "red"
+                            # Formatiere Preis- und Gewinn-Spalten
+                            trade_df["Einstiegspreis"] = trade_df["Einstiegspreis"].map("${:.2f}".format)
+                            trade_df["Ausstiegspreis"] = trade_df["Ausstiegspreis"].map("${:.2f}".format)
+                            trade_df["Gewinn_Prozent"] = trade_df["Gewinn_Prozent"].map("{:.2f}%".format)
+                            trade_df["Gewinn_USD"] = trade_df["Gewinn_USD"].map("${:.2f}".format)
                             
-                            col1, col2, col3 = st.columns(3)
+                            # Konditionale Formatierung anwenden
+                            def highlight_profit(row):
+                                profit = row["Gewinn_Prozent"]
+                                profit_value = float(profit.replace("%", ""))
+                                if profit_value > 0:
+                                    return ["background-color: rgba(0,255,0,0.1)" if col == "Gewinn_Prozent" else "" for col in row.index]
+                                elif profit_value < 0:
+                                    return ["background-color: rgba(255,0,0,0.1)" if col == "Gewinn_Prozent" else "" for col in row.index]
+                                return ["" for _ in row.index]
                             
-                            with col1:
-                                st.metric(
-                                    "Strategie-Rendite",
-                                    f"{strategy_return:.2f}%",
-                                    f"{strategy_return - buy_hold_return:.2f}% ggü. Buy & Hold",
-                                    delta_color=strategy_color
-                                )
+                            # Sortiere nach Einstiegsdatum
+                            trade_df = trade_df.sort_values(by="Einstiegsdatum")
                             
-                            with col2:
-                                st.metric(
-                                    "Buy & Hold Rendite",
-                                    f"{buy_hold_return:.2f}%"
-                                )
-                            
-                            with col3:
-                                st.metric(
-                                    "Max. Drawdown",
-                                    f"{backtest_results['max_drawdown_pct']:.2f}%"
-                                )
-                            
-                            # Zeige Equity-Kurve
-                            st.subheader("Equity-Kurve und Trades")
-                            st.plotly_chart(equity_chart, use_container_width=True)
-                            
-                            # Zeige Trade-Historie in aufklappbarem Bereich
-                            with st.expander("Trade-Historie"):
-                                # Konvertiere Trade-Historie in DataFrame zur Anzeige
-                                if backtest_results["trades"]:
-                                    trade_df = pd.DataFrame(backtest_results["trades"])
-                                    
-                                    # Formatiere Spalten
-                                    trade_df["Einstiegsdatum"] = pd.to_datetime(trade_df["Einstiegsdatum"])
-                                    trade_df["Ausstiegsdatum"] = pd.to_datetime(trade_df["Ausstiegsdatum"])
-                                    
-                                    # Formatiere Preis- und Gewinn-Spalten
-                                    trade_df["Einstiegspreis"] = trade_df["Einstiegspreis"].map("${:.2f}".format)
-                                    trade_df["Ausstiegspreis"] = trade_df["Ausstiegspreis"].map("${:.2f}".format)
-                                    trade_df["Gewinn_Prozent"] = trade_df["Gewinn_Prozent"].map("{:.2f}%".format)
-                                    trade_df["Gewinn_USD"] = trade_df["Gewinn_USD"].map("${:.2f}".format)
-                                    
-                                    # Konditionale Formatierung anwenden
-                                    def highlight_profit(row):
-                                        profit = row["Gewinn_Prozent"]
-                                        profit_value = float(profit.replace("%", ""))
-                                        if profit_value > 0:
-                                            return ["background-color: rgba(0,255,0,0.1)" if col == "Gewinn_Prozent" else "" for col in row.index]
-                                        elif profit_value < 0:
-                                            return ["background-color: rgba(255,0,0,0.1)" if col == "Gewinn_Prozent" else "" for col in row.index]
-                                        return ["" for _ in row.index]
-                                    
-                                    # Sortiere nach Einstiegsdatum
-                                    trade_df = trade_df.sort_values(by="Einstiegsdatum")
-                                    
-                                    # Zeige formatiertes DataFrame
-                                    st.dataframe(
-                                        trade_df.style.apply(highlight_profit, axis=1),
-                                        use_container_width=True
-                                    )
-                                else:
-                                    st.info("Im Backtesting-Zeitraum wurden keine Trades ausgeführt.")
-                            
-                            # Kurze Erklärung zur Interpretation
-                            st.markdown("""
-                            **Hinweise zur Interpretation:**
-                            - **Überrendite**: Zeigt, wie viel besser oder schlechter die Strategie im Vergleich zu einer einfachen Buy-&-Hold-Strategie abgeschnitten hat.
-                            - **Grüne Dreiecke**: Kaufsignale gemäß der Weinstein-Strategie
-                            - **Rote Dreiecke**: Verkaufssignale (entweder durch Phasenwechsel oder Stop-Loss)
-                            - **Flache Bereiche**: Zeiten ohne Investment (Cash-Position)
-                            """)
-                            
+                            # Zeige formatiertes DataFrame
+                            st.dataframe(
+                                trade_df.style.apply(highlight_profit, axis=1),
+                                use_container_width=True
+                            )
                         else:
-                            st.error(f"Backtest fehlgeschlagen: {backtest_results.get('error', 'Unbekannter Fehler')}")
+                            st.info("Im Backtesting-Zeitraum wurden keine Trades ausgeführt.")
+                    
+                    # Kurze Erklärung zur Interpretation
+                    st.markdown("""
+                    **Hinweise zur Interpretation:**
+                    - **Überrendite**: Zeigt, wie viel besser oder schlechter die Strategie im Vergleich zu einer einfachen Buy-&-Hold-Strategie abgeschnitten hat.
+                    - **Grüne Dreiecke**: Kaufsignale gemäß der Weinstein-Strategie
+                    - **Rote Dreiecke**: Verkaufssignale (entweder durch Phasenwechsel oder Stop-Loss)
+                    - **Flache Bereiche**: Zeiten ohne Investment (Cash-Position)
+                    """)
+                    
+                else:
+                    if analyzer.backtest_results:
+                        # Backtest wurde durchgeführt, war aber nicht erfolgreich
+                        st.error(f"Backtest fehlgeschlagen: {analyzer.backtest_results.get('error', 'Unbekannter Fehler')}")
+                    else:
+                        # Kein Backtest vorhanden
+                        st.info("Kein Backtest verfügbar. Möglicherweise nicht genügend Daten oder es trat ein Fehler auf.")
+                        
         else:
             # Show error message if analysis failed
             if st.session_state.analyzer.errors:
