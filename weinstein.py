@@ -572,7 +572,7 @@ class WeinsteinTickerAnalyzer:
                                     sector_ma30 = float(current_sector['MA30']) if not pd.isna(current_sector['MA30']) else 0
                                     
                                 if isinstance(current_sector['MA30_Slope'], pd.Series):
-                                    sector_ma30_slope = float(current_sector['MA30_Slope'].iloc[0]) if not current_sector['MA30_Slope'].empty else 0
+                                    sector_ma30_slope = float(current_sector['MA30_Slope'].iloc[0]) if not current_sector['MA30_Slope'].empty and not pd.isna(current_sector['MA30_Slope'].iloc[0]) else 0
                                 else:
                                     sector_ma30_slope = float(current_sector['MA30_Slope']) if not pd.isna(current_sector['MA30_Slope']) else 0
                             
@@ -1341,212 +1341,212 @@ class WeinsteinTickerAnalyzer:
             self.recommendation = "ERROR - No recommendation possible"
     
     def generate_detailed_analysis(self):
-    """Generate a detailed analysis text based on the identified phase and indicators"""
-    if self.phase == 0 or self.data is None or len(self.data) == 0:
-        self.detailed_analysis = "Insufficient data for analysis."
-        return
-    
-    try:
-        # Access the latest data point
-        current = self.data.iloc[-1]
+        """Generate a detailed analysis text based on the identified phase and indicators"""
+        if self.phase == 0 or self.data is None or len(self.data) == 0:
+            self.detailed_analysis = "Insufficient data for analysis."
+            return
         
-        # Safe extraction of values
-        def safe_get_value(row, column, default=None):
-            if column not in row:
-                return default
+        try:
+            # Access the latest data point
+            current = self.data.iloc[-1]
             
-            value = row[column]
-            # Handle different data types
-            if isinstance(value, pd.Series):
-                if value.empty:
+            # Safe extraction of values
+            def safe_get_value(row, column, default=None):
+                if column not in row:
                     return default
-                if pd.isna(value.iloc[0]):
-                    return default
-                try:
-                    return float(value.iloc[0])
-                except:
-                    return default
-            elif isinstance(value, pd.DataFrame):
-                if value.empty:
-                    return default
-                if pd.isna(value.iloc[0,0]):
-                    return default
-                try:
-                    return float(value.iloc[0,0])
-                except:
-                    return default
-            elif isinstance(value, bool):
-                return value
-            elif pd.isna(value):
-                return default
-            else:
-                try:
-                    return float(value)
-                except (TypeError, ValueError):
-                    return default
-        
-        # Extract key indicators
-        rsi = safe_get_value(current, 'RSI')
-        vol_ratio = safe_get_value(current, 'Vol_Ratio')
-        ma30_slope = safe_get_value(current, 'MA30_Slope')
-        pct_from_ma30 = safe_get_value(current, 'Pct_From_MA30')
-        pct_from_52wk_high = safe_get_value(current, 'Pct_From_52wk_High')
-        
-        # Market and sector context
-        market_context_text = ""
-        if self.market_context:
-            market_phase_desc = {
-                1: "Base Formation", 
-                2: "Uptrend", 
-                3: "Top Formation", 
-                4: "Downtrend"
-            }.get(self.market_context['phase'], "Unknown")
-            
-            market_context_text = f"The overall market (S&P 500) is in a {market_phase_desc} phase. "
-            if self.market_context['phase'] == 2:
-                market_context_text += "The market uptrend provides a favorable backdrop for bullish positions. "
-            elif self.market_context['phase'] == 4:
-                market_context_text += "The market downtrend suggests caution for long positions. "
-        
-        sector_context_text = ""
-        if self.sector_data:
-            sector_phase_desc = {
-                1: "Base Formation", 
-                2: "Uptrend", 
-                3: "Top Formation", 
-                4: "Downtrend"
-            }.get(self.sector_data['phase'], "Unknown")
-            
-            sector_context_text = f"The {self.sector_data['name']} sector is in a {sector_phase_desc} phase. "
-            if self.sector_data['relative_strength'] > 5:
-                sector_context_text += f"This sector is showing strong relative strength (+{self.sector_data['relative_strength']:.1f}%) compared to the broader market. "
-            elif self.sector_data['relative_strength'] < -5:
-                sector_context_text += f"This sector is underperforming the broader market ({self.sector_data['relative_strength']:.1f}% relative strength). "
-        
-        # Find closest support and resistance levels - FIXED VERSION
-        levels_text = ""
-        if self.support_resistance_levels:
-            try:
-                # Filter levels
-                resistance_levels = [level for level in self.support_resistance_levels if level['type'] == 'resistance']
-                support_levels = [level for level in self.support_resistance_levels if level['type'] == 'support']
                 
-                # Find nearest resistance level
-                if resistance_levels and self.last_price:
-                    nearest_resistance = min(resistance_levels, key=lambda x: abs(x['price'] - self.last_price))
-                    resistance_price = float(nearest_resistance['price'])
-                    resistance_pct = (resistance_price - self.last_price) / self.last_price * 100
-                    
-                    # Format with explicit direction symbol
-                    if resistance_pct >= 0:
-                        resistance_text = f"The nearest resistance is at ${resistance_price:.2f} (+{abs(resistance_pct):.1f}%). "
-                    else:
-                        resistance_text = f"The nearest resistance is at ${resistance_price:.2f} (-{abs(resistance_pct):.1f}%). "
-                    
-                    levels_text += resistance_text
+                value = row[column]
+                # Handle different data types
+                if isinstance(value, pd.Series):
+                    if value.empty:
+                        return default
+                    if pd.isna(value.iloc[0]):
+                        return default
+                    try:
+                        return float(value.iloc[0])
+                    except:
+                        return default
+                elif isinstance(value, pd.DataFrame):
+                    if value.empty:
+                        return default
+                    if pd.isna(value.iloc[0,0]):
+                        return default
+                    try:
+                        return float(value.iloc[0,0])
+                    except:
+                        return default
+                elif isinstance(value, bool):
+                    return value
+                elif pd.isna(value):
+                    return default
+                else:
+                    try:
+                        return float(value)
+                    except (TypeError, ValueError):
+                        return default
+            
+            # Extract key indicators
+            rsi = safe_get_value(current, 'RSI')
+            vol_ratio = safe_get_value(current, 'Vol_Ratio')
+            ma30_slope = safe_get_value(current, 'MA30_Slope')
+            pct_from_ma30 = safe_get_value(current, 'Pct_From_MA30')
+            pct_from_52wk_high = safe_get_value(current, 'Pct_From_52wk_High')
+            
+            # Market and sector context
+            market_context_text = ""
+            if self.market_context:
+                market_phase_desc = {
+                    1: "Base Formation", 
+                    2: "Uptrend", 
+                    3: "Top Formation", 
+                    4: "Downtrend"
+                }.get(self.market_context['phase'], "Unknown")
                 
-                # Find nearest support level
-                if support_levels and self.last_price:
-                    nearest_support = min(support_levels, key=lambda x: abs(x['price'] - self.last_price))
-                    support_price = float(nearest_support['price'])
-                    support_pct = (self.last_price - support_price) / self.last_price * 100
+                market_context_text = f"The overall market (S&P 500) is in a {market_phase_desc} phase. "
+                if self.market_context['phase'] == 2:
+                    market_context_text += "The market uptrend provides a favorable backdrop for bullish positions. "
+                elif self.market_context['phase'] == 4:
+                    market_context_text += "The market downtrend suggests caution for long positions. "
+            
+            sector_context_text = ""
+            if self.sector_data:
+                sector_phase_desc = {
+                    1: "Base Formation", 
+                    2: "Uptrend", 
+                    3: "Top Formation", 
+                    4: "Downtrend"
+                }.get(self.sector_data['phase'], "Unknown")
+                
+                sector_context_text = f"The {self.sector_data['name']} sector is in a {sector_phase_desc} phase. "
+                if self.sector_data['relative_strength'] > 5:
+                    sector_context_text += f"This sector is showing strong relative strength (+{self.sector_data['relative_strength']:.1f}%) compared to the broader market. "
+                elif self.sector_data['relative_strength'] < -5:
+                    sector_context_text += f"This sector is underperforming the broader market ({self.sector_data['relative_strength']:.1f}% relative strength). "
+            
+            # Find closest support and resistance levels - FIXED VERSION
+            levels_text = ""
+            if self.support_resistance_levels:
+                try:
+                    # Filter levels
+                    resistance_levels = [level for level in self.support_resistance_levels if level['type'] == 'resistance']
+                    support_levels = [level for level in self.support_resistance_levels if level['type'] == 'support']
                     
-                    # Format with explicit direction symbol
-                    if support_pct >= 0:
-                        support_text = f"The nearest support is at ${support_price:.2f} (-{abs(support_pct):.1f}%)."
-                    else:
-                        support_text = f"The nearest support is at ${support_price:.2f} (+{abs(support_pct):.1f}%)."
+                    # Find nearest resistance level
+                    if resistance_levels and self.last_price:
+                        nearest_resistance = min(resistance_levels, key=lambda x: abs(x['price'] - self.last_price))
+                        resistance_price = float(nearest_resistance['price'])
+                        resistance_pct = (resistance_price - self.last_price) / self.last_price * 100
+                        
+                        # Format with explicit direction symbol
+                        if resistance_pct >= 0:
+                            resistance_text = f"The nearest resistance is at ${resistance_price:.2f} (+{abs(resistance_pct):.1f}%). "
+                        else:
+                            resistance_text = f"The nearest resistance is at ${resistance_price:.2f} (-{abs(resistance_pct):.1f}%). "
+                        
+                        levels_text += resistance_text
                     
-                    levels_text += support_text
-            except Exception as e:
-                logger.warning(f"Error formatting support/resistance levels: {str(e)}")
-                levels_text = "Support and resistance levels could not be properly formatted."
-        
-        # Phase-specific analysis
-        phase_analysis = ""
-        if self.phase == 1:  # Base Formation
-            phase_analysis = (
-                f"{self.ticker_symbol} is in a Stage 1 Base Formation. "
-                f"This is a consolidation phase following a downtrend where supply and demand are reaching equilibrium. "
+                    # Find nearest support level
+                    if support_levels and self.last_price:
+                        nearest_support = min(support_levels, key=lambda x: abs(x['price'] - self.last_price))
+                        support_price = float(nearest_support['price'])
+                        support_pct = (self.last_price - support_price) / self.last_price * 100
+                        
+                        # Format with explicit direction symbol
+                        if support_pct >= 0:
+                            support_text = f"The nearest support is at ${support_price:.2f} (-{abs(support_pct):.1f}%)."
+                        else:
+                            support_text = f"The nearest support is at ${support_price:.2f} (+{abs(support_pct):.1f}%)."
+                        
+                        levels_text += support_text
+                except Exception as e:
+                    logger.warning(f"Error formatting support/resistance levels: {str(e)}")
+                    levels_text = "Support and resistance levels could not be properly formatted."
+            
+            # Phase-specific analysis
+            phase_analysis = ""
+            if self.phase == 1:  # Base Formation
+                phase_analysis = (
+                    f"{self.ticker_symbol} is in a Stage 1 Base Formation. "
+                    f"This is a consolidation phase following a downtrend where supply and demand are reaching equilibrium. "
+                )
+                
+                if rsi and rsi > 50:
+                    phase_analysis += "RSI is above 50, indicating improving momentum within the base. "
+                
+                if ma30_slope and ma30_slope > 0:
+                    phase_analysis += "The 30-week moving average has begun to flatten and turn upward, a positive sign. "
+                
+                if vol_ratio and vol_ratio > 1.1:
+                    phase_analysis += "Volume is showing signs of accumulation, suggesting smart money may be taking positions. "
+                
+                phase_analysis += "According to Weinstein's method, the ideal time to buy is when the stock breaks out from this base into Stage 2 with increased volume. "
+                
+            elif self.phase == 2:  # Uptrend
+                phase_analysis = (
+                    f"{self.ticker_symbol} is in a Stage 2 Uptrend. "
+                    f"This is the most profitable stage where price is trending higher with higher highs and higher lows. "
+                )
+                
+                if pct_from_ma30 is not None:
+                    if pct_from_ma30 < -5:
+                        phase_analysis += f"Price has pulled back {abs(pct_from_ma30):.1f}% from the 30-week MA, offering a potential buying opportunity. "
+                    elif pct_from_ma30 > 10:
+                        phase_analysis += f"Price is extended {pct_from_ma30:.1f}% above its 30-week MA, suggesting caution and tighter stops. "
+                
+                if vol_ratio and vol_ratio > 1.2:
+                    phase_analysis += "Volume is confirming the uptrend with above-average participation. "
+                
+                if rsi:
+                    if rsi > 70:
+                        phase_analysis += f"RSI is overbought at {rsi:.1f}, suggesting potential for a short-term pullback. "
+                    elif 40 < rsi < 70:
+                        phase_analysis += f"RSI at {rsi:.1f} shows healthy momentum without being overbought. "
+                
+            elif self.phase == 3:  # Top Formation
+                phase_analysis = (
+                    f"{self.ticker_symbol} is in a Stage 3 Top Formation. "
+                    f"This distribution phase typically occurs after a strong uptrend and precedes a downtrend. "
+                )
+                
+                if ma30_slope and ma30_slope < 0:
+                    phase_analysis += "The 30-week moving average has started to roll over, a warning sign. "
+                
+                if vol_ratio and vol_ratio > 1.2:
+                    phase_analysis += "Higher volume on down days suggests distribution (selling) by institutions. "
+                
+                if rsi and rsi < 50:
+                    phase_analysis += "Declining RSI indicates weakening momentum. "
+                
+                phase_analysis += "According to Weinstein's method, this is typically a time to take profits or tighten stops rather than establishing new positions. "
+                
+            elif self.phase == 4:  # Downtrend
+                phase_analysis = (
+                    f"{self.ticker_symbol} is in a Stage 4 Downtrend. "
+                    f"This bearish phase is characterized by lower highs and lower lows with price below a declining 30-week MA. "
+                )
+                
+                if pct_from_52wk_high is not None:
+                    phase_analysis += f"Price is {abs(pct_from_52wk_high):.1f}% below its 52-week high. "
+                
+                if rsi and rsi < 30:
+                    phase_analysis += f"RSI is oversold at {rsi:.1f}, which may lead to short-term bounces, but the primary trend remains down. "
+                
+                phase_analysis += "According to Weinstein's method, Stage 4 stocks should be avoided for long positions. Wait for a Stage 1 base to form before considering entry. "
+                
+            # Combine all analysis components
+            self.detailed_analysis = (
+                f"{phase_analysis}\n\n"
+                f"{market_context_text}{sector_context_text}\n\n"
+                f"{levels_text}\n\n"
+                f"Recommendation: {self.recommendation}"
             )
             
-            if rsi and rsi > 50:
-                phase_analysis += "RSI is above 50, indicating improving momentum within the base. "
+            logger.info(f"Generated detailed analysis for {self.ticker_symbol}")
             
-            if ma30_slope and ma30_slope > 0:
-                phase_analysis += "The 30-week moving average has begun to flatten and turn upward, a positive sign. "
-            
-            if vol_ratio and vol_ratio > 1.1:
-                phase_analysis += "Volume is showing signs of accumulation, suggesting smart money may be taking positions. "
-            
-            phase_analysis += "According to Weinstein's method, the ideal time to buy is when the stock breaks out from this base into Stage 2 with increased volume. "
-            
-        elif self.phase == 2:  # Uptrend
-            phase_analysis = (
-                f"{self.ticker_symbol} is in a Stage 2 Uptrend. "
-                f"This is the most profitable stage where price is trending higher with higher highs and higher lows. "
-            )
-            
-            if pct_from_ma30 is not None:
-                if pct_from_ma30 < -5:
-                    phase_analysis += f"Price has pulled back {abs(pct_from_ma30):.1f}% from the 30-week MA, offering a potential buying opportunity. "
-                elif pct_from_ma30 > 10:
-                    phase_analysis += f"Price is extended {pct_from_ma30:.1f}% above its 30-week MA, suggesting caution and tighter stops. "
-            
-            if vol_ratio and vol_ratio > 1.2:
-                phase_analysis += "Volume is confirming the uptrend with above-average participation. "
-            
-            if rsi:
-                if rsi > 70:
-                    phase_analysis += f"RSI is overbought at {rsi:.1f}, suggesting potential for a short-term pullback. "
-                elif 40 < rsi < 70:
-                    phase_analysis += f"RSI at {rsi:.1f} shows healthy momentum without being overbought. "
-            
-        elif self.phase == 3:  # Top Formation
-            phase_analysis = (
-                f"{self.ticker_symbol} is in a Stage 3 Top Formation. "
-                f"This distribution phase typically occurs after a strong uptrend and precedes a downtrend. "
-            )
-            
-            if ma30_slope and ma30_slope < 0:
-                phase_analysis += "The 30-week moving average has started to roll over, a warning sign. "
-            
-            if vol_ratio and vol_ratio > 1.2:
-                phase_analysis += "Higher volume on down days suggests distribution (selling) by institutions. "
-            
-            if rsi and rsi < 50:
-                phase_analysis += "Declining RSI indicates weakening momentum. "
-            
-            phase_analysis += "According to Weinstein's method, this is typically a time to take profits or tighten stops rather than establishing new positions. "
-            
-        elif self.phase == 4:  # Downtrend
-            phase_analysis = (
-                f"{self.ticker_symbol} is in a Stage 4 Downtrend. "
-                f"This bearish phase is characterized by lower highs and lower lows with price below a declining 30-week MA. "
-            )
-            
-            if pct_from_52wk_high is not None:
-                phase_analysis += f"Price is {abs(pct_from_52wk_high):.1f}% below its 52-week high. "
-            
-            if rsi and rsi < 30:
-                phase_analysis += f"RSI is oversold at {rsi:.1f}, which may lead to short-term bounces, but the primary trend remains down. "
-            
-            phase_analysis += "According to Weinstein's method, Stage 4 stocks should be avoided for long positions. Wait for a Stage 1 base to form before considering entry. "
-            
-        # Combine all analysis components
-        self.detailed_analysis = (
-            f"{phase_analysis}\n\n"
-            f"{market_context_text}{sector_context_text}\n\n"
-            f"{levels_text}\n\n"
-            f"Recommendation: {self.recommendation}"
-        )
-        
-        logger.info(f"Generated detailed analysis for {self.ticker_symbol}")
-        
-    except Exception as e:
-        logger.error(f"Error generating detailed analysis: {str(e)}")
-        traceback.print_exc()
-        self.detailed_analysis = f"Error generating analysis: {str(e)}"
+        except Exception as e:
+            logger.error(f"Error generating detailed analysis: {str(e)}")
+            traceback.print_exc()
+            self.detailed_analysis = f"Error generating analysis: {str(e)}"
         
     def create_interactive_chart(self):
         """Create an interactive chart with Plotly and enhanced visualization"""
@@ -2021,7 +2021,7 @@ class WeinsteinTickerAnalyzer:
                 
             bin_size = price_range / num_bins
             
-            # Calculate volume for each price bin with enhanced method
+# Calculate volume for each price bin with enhanced method
             volume_by_price = {}
             
             # Distribute volume across the high-low range for each bar
@@ -2038,7 +2038,7 @@ class WeinsteinTickerAnalyzer:
                 low_bin = max(0, int((bar_low - min_price) / bin_size))
                 high_bin = min(num_bins - 1, int((bar_high - min_price) / bin_size))
                 
-# Evenly distribute volume across bins (could be weighted by time spent at each price)
+                # Evenly distribute volume across bins (could be weighted by time spent at each price)
                 bins_spanned = max(1, high_bin - low_bin + 1)
                 volume_per_bin = bar_volume / bins_spanned
                 
