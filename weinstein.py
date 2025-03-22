@@ -248,8 +248,76 @@ class WeinsteinTickerAnalyzer:
             
         return False
     
+    def find_sector_etf_from_csv(self, ticker_symbol):
+        """
+        Search through SPDR sector ETF CSV files to find which sector the ticker belongs to.
+        
+        Args:
+            ticker_symbol (str): The ticker symbol to search for
+            
+        Returns:
+            tuple: (sector_name, etf_symbol) if found, otherwise (None, None)
+        """
+        logger.info(f"Searching for {ticker_symbol} in SPDR sector ETF CSV files")
+        
+        # Map of ETF symbols to sector names
+        etf_to_sector = {
+            'XLF': 'Financials',
+            'XLK': 'Information Technology',
+            'XLV': 'Health Care',
+            'XLY': 'Consumer Discretionary',
+            'XLP': 'Consumer Staples',
+            'XLE': 'Energy',
+            'XLB': 'Materials',
+            'XLI': 'Industrials',
+            'XLRE': 'Real Estate',
+            'XLU': 'Utilities',
+            'XLC': 'Communication Services'
+        }
+        
+        # List of ETF CSV files to search
+        etf_files = [f"{etf}.csv" for etf in etf_to_sector.keys()]
+        
+        # Normalize the ticker for comparison
+        normalized_ticker = ticker_symbol.upper().strip()
+        
+        # Search through each CSV file
+        for etf_file in etf_files:
+            try:
+                # Check if file exists
+                import os
+                if not os.path.exists(etf_file):
+                    logger.debug(f"File {etf_file} does not exist, skipping")
+                    continue
+                    
+                logger.debug(f"Searching in {etf_file}")
+                
+                # Read the CSV file
+                import pandas as pd
+                df = pd.read_csv(etf_file, encoding='utf-8')
+                
+                # Look for the ticker in all columns as the format could vary
+                ticker_found = False
+                for column in df.columns:
+                    # Convert to string to handle non-string columns
+                    if df[column].astype(str).str.contains(normalized_ticker, case=False, regex=False).any():
+                        ticker_found = True
+                        break
+                
+                if ticker_found:
+                    etf_symbol = etf_file.replace('.csv', '')
+                    sector_name = etf_to_sector.get(etf_symbol)
+                    logger.info(f"Found {ticker_symbol} in {etf_file}, sector: {sector_name}")
+                    return sector_name, etf_symbol
+                    
+            except Exception as e:
+                logger.warning(f"Error searching in {etf_file}: {str(e)}")
+        
+        logger.info(f"Ticker {ticker_symbol} not found in any sector ETF CSV file")
+        return None, None
+    
     def load_market_context(self):
-        """Load market context data (S&P 500 index) for relative analysis"""
+        """Load market context data (S&P 500 index) for relative analysis with enhanced sector detection using ETF CSV files"""
         try:
             market_data = yf.download(
                 "^GSPC",  # S&P 500 index
@@ -315,82 +383,261 @@ class WeinsteinTickerAnalyzer:
                 
                 logger.info(f"Market context loaded: Phase {market_phase}")
                 
-                # Try to load sector data if available
+                # Try to load sector data with enhanced detection and error handling
                 try:
-                    # Get ticker info to identify sector
-                    ticker_info = yf.Ticker(self.ticker_symbol).info
-                    if 'sector' in ticker_info:
-                        sector = ticker_info['sector']
-                        # Map sectors to sector ETFs
-                        sector_etfs = {
-                            'Technology': 'XLK',
-                            'Financial Services': 'XLF',
-                            'Healthcare': 'XLV',
-                            'Consumer Cyclical': 'XLY',
-                            'Industrials': 'XLI',
-                            'Communication Services': 'XLC',
-                            'Consumer Defensive': 'XLP',
-                            'Energy': 'XLE',
-                            'Basic Materials': 'XLB',
-                            'Real Estate': 'XLRE',
-                            'Utilities': 'XLU'
+                    # STRATEGY 1: First look in CSV files of ETF holdings (most reliable method)
+                    sector, sector_etf = self.find_sector_etf_from_csv(self.ticker_symbol)
+                    
+                    # If not found in CSV files, try alternative methods
+                    if not sector or not sector_etf:
+                        logger.info(f"Ticker {self.ticker_symbol} not found in sector ETF CSV files, trying alternative methods")
+                        
+                        # Get ticker info with detailed logging
+                        ticker_obj = yf.Ticker(self.ticker_symbol)
+                        ticker_info = ticker_obj.info
+                        
+                        # Debug: Log available keys to help troubleshoot
+                        if ticker_info:
+                            logger.debug(f"Ticker info keys for {self.ticker_symbol}: {list(ticker_info.keys())}")
+                        else:
+                            logger.warning(f"No ticker_info returned for {self.ticker_symbol}")
+                        
+                        # STRATEGY 2: Manually map common tickers to sectors
+                        # This is a fallback for tickers that might have API issues
+                        manual_sector_map = {
+                            'AAPL': ('Information Technology', 'XLK'),
+                            'MSFT': ('Information Technology', 'XLK'),
+                            'AMZN': ('Consumer Discretionary', 'XLY'),
+                            'GOOG': ('Communication Services', 'XLC'),
+                            'GOOGL': ('Communication Services', 'XLC'),
+                            'META': ('Communication Services', 'XLC'),
+                            'TSLA': ('Consumer Discretionary', 'XLY'),
+                            'JPM': ('Financials', 'XLF'),
+                            'V': ('Financials', 'XLF'),
+                            'NVDA': ('Information Technology', 'XLK'),
+                            'DIS': ('Communication Services', 'XLC')
+                            # Add more common tickers as needed
                         }
                         
+                        # Check if we have a manual mapping for this ticker
+                        if self.ticker_symbol.upper() in manual_sector_map:
+                            sector, sector_etf = manual_sector_map[self.ticker_symbol.upper()]
+                            logger.info(f"Using manual sector mapping for {self.ticker_symbol}: {sector} -> {sector_etf}")
+                        
+                        # STRATEGY 3: Try to get sector directly from ticker_info
+                        elif ticker_info:
+                            # Try multiple possible keys where sector info might be stored
+                            sector_keys = ['sector', 'sectorDisp', 'sectorChain', 'industryGroup']
+                            for key in sector_keys:
+                                if key in ticker_info and ticker_info[key]:
+                                    sector = ticker_info[key]
+                                    logger.info(f"Found sector '{sector}' using key '{key}'")
+                                    break
+                            
+                            # If no sector found, try industry as fallback
+                            if not sector:
+                                industry_keys = ['industry', 'industryDisp', 'industryKey']
+                                for key in industry_keys:
+                                    if key in ticker_info and ticker_info[key]:
+                                        industry = ticker_info[key]
+                                        logger.info(f"No sector found, using industry: {industry}")
+                                        
+                                        # Map industry to sector (simplified mapping)
+                                        industry_to_sector = {
+                                            'software': 'Information Technology',
+                                            'hardware': 'Information Technology',
+                                            'semiconductor': 'Information Technology',
+                                            'bank': 'Financials',
+                                            'insurance': 'Financials',
+                                            'pharma': 'Health Care',
+                                            'biotech': 'Health Care',
+                                            'medical': 'Health Care',
+                                            'retail': 'Consumer Discretionary',
+                                            'auto': 'Consumer Discretionary',
+                                            'aerospace': 'Industrials',
+                                            'defense': 'Industrials',
+                                            'telecom': 'Communication Services',
+                                            'media': 'Communication Services',
+                                            'food': 'Consumer Staples',
+                                            'beverage': 'Consumer Staples',
+                                            'oil': 'Energy',
+                                            'gas': 'Energy',
+                                            'chemical': 'Materials',
+                                            'mining': 'Materials',
+                                            'real estate': 'Real Estate',
+                                            'reit': 'Real Estate',
+                                            'utility': 'Utilities',
+                                            'electric': 'Utilities'
+                                        }
+                                        
+                                        # Try to match industry to a sector
+                                        industry_lower = industry.lower()
+                                        for ind_key, sec_value in industry_to_sector.items():
+                                            if ind_key in industry_lower:
+                                                sector = sec_value
+                                                logger.info(f"Mapped industry '{industry}' to sector '{sector}'")
+                                                break
+                                        
+                                        if sector:
+                                            break
+                    
+                    # Expanded and updated sector to ETF mapping
+                    sector_etfs = {
+                        # Standard GICS sectors
+                        'Information Technology': 'XLK',
+                        'Financials': 'XLF',
+                        'Health Care': 'XLV',
+                        'Consumer Discretionary': 'XLY',
+                        'Industrials': 'XLI',
+                        'Communication Services': 'XLC',
+                        'Consumer Staples': 'XLP',
+                        'Energy': 'XLE',
+                        'Materials': 'XLB',
+                        'Real Estate': 'XLRE',
+                        'Utilities': 'XLU',
+                        
+                        # Alternative/legacy sector names from Yahoo Finance
+                        'Technology': 'XLK',
+                        'Financial Services': 'XLF',
+                        'Healthcare': 'XLV',
+                        'Consumer Cyclical': 'XLY',
+                        'Communication': 'XLC',
+                        'Consumer Defensive': 'XLP',
+                        'Basic Materials': 'XLB',
+                        'Financial': 'XLF'
+                    }
+                    
+                    # If we have a sector but no ETF yet, look it up in our mapping
+                    if sector and not sector_etf:
                         if sector in sector_etfs:
                             sector_etf = sector_etfs[sector]
-                            sector_data = yf.download(
-                                sector_etf,
-                                period=self.period,
-                                interval=self.interval,
-                                progress=False
-                            )
+                            logger.info(f"Mapped sector '{sector}' to ETF '{sector_etf}'")
+                        else:
+                            # Try case-insensitive matching
+                            sector_lower = sector.lower()
+                            for sec_key, etf in sector_etfs.items():
+                                if sec_key.lower() == sector_lower:
+                                    sector_etf = etf
+                                    logger.info(f"Case-insensitive match: '{sector}' to '{sec_key}' (ETF: {etf})")
+                                    sector = sec_key  # Use the correctly cased sector name
+                                    break
                             
-                            if len(sector_data) > 0:
-                                # Calculate sector indicators
-                                sector_data['MA30'] = sector_data['Close'].rolling(window=30).mean()
-                                sector_data['MA30_Slope'] = sector_data['MA30'].diff()
+                            if not sector_etf:
+                                logger.warning(f"Sector '{sector}' found but no matching ETF mapping exists")
                                 
-                                # Determine sector phase
-                                current_sector = sector_data.iloc[-1]
-                                sector_price_above_ma = current_sector['Close'] > current_sector['MA30']
-                                sector_ma_slope_positive = current_sector['MA30_Slope'] > 0
-                                
-                                if sector_price_above_ma and sector_ma_slope_positive:
-                                    sector_phase = 2  # Uptrend
-                                elif sector_price_above_ma and not sector_ma_slope_positive:
-                                    sector_phase = 3  # Top formation
-                                elif not sector_price_above_ma and not sector_ma_slope_positive:
-                                    sector_phase = 4  # Downtrend
+                        # Try one more time with CSV files if we only have a sector and need an ETF
+                        if sector and not sector_etf:
+                            for etf_symbol, sector_name in sector_etfs.items():
+                                if sector_name.lower() == sector.lower():
+                                    sector_etf = etf_symbol
+                                    logger.info(f"Using ETF {sector_etf} for sector {sector}")
+                                    break
+                    
+                    # Only proceed with sector analysis if we have both sector and ETF
+                    if sector and sector_etf:
+                        logger.info(f"Downloading data for sector ETF: {sector_etf}")
+                        
+                        # Download sector ETF data
+                        sector_data = yf.download(
+                            sector_etf,
+                            period=self.period,
+                            interval=self.interval,
+                            progress=False
+                        )
+                        
+                        if len(sector_data) > 0:
+                            # Calculate sector indicators
+                            sector_data['MA30'] = sector_data['Close'].rolling(window=30).mean()
+                            sector_data['MA30_Slope'] = sector_data['MA30'].diff()
+                            
+                            # Determine sector phase
+                            current_sector = sector_data.iloc[-1]
+                            
+                            # Safe extraction of scalar values
+                            try:
+                                sector_close = float(current_sector['Close']) if not pd.isna(current_sector['Close']).any() else 0
+                                sector_ma30 = float(current_sector['MA30']) if not pd.isna(current_sector['MA30']).any() else 0
+                                sector_ma30_slope = float(current_sector['MA30_Slope']) if not pd.isna(current_sector['MA30_Slope']).any() else 0
+                            except Exception as e:
+                                logger.warning(f"Error extracting sector values: {str(e)}")
+                                # Fallback method
+                                if isinstance(current_sector['Close'], pd.Series):
+                                    sector_close = float(current_sector['Close'].iloc[0]) if not current_sector['Close'].empty else 0
                                 else:
-                                    sector_phase = 1  # Base formation
-                                
-                                # Get sector performance metrics
-                                if len(sector_data) >= 4:
-                                    sector_1month_perf = (sector_data['Close'].iloc[-1] / sector_data['Close'].iloc[-4] - 1) * 100
+                                    sector_close = float(current_sector['Close']) if not pd.isna(current_sector['Close']) else 0
+                                    
+                                if isinstance(current_sector['MA30'], pd.Series):
+                                    sector_ma30 = float(current_sector['MA30'].iloc[0]) if not current_sector['MA30'].empty else 0
                                 else:
-                                    sector_1month_perf = 0
+                                    sector_ma30 = float(current_sector['MA30']) if not pd.isna(current_sector['MA30']) else 0
+                                    
+                                if isinstance(current_sector['MA30_Slope'], pd.Series):
+                                    sector_ma30_slope = float(current_sector['MA30_Slope'].iloc[0]) if not current_sector['MA30_Slope'].empty else 0
+                                else:
+                                    sector_ma30_slope = float(current_sector['MA30_Slope']) if not pd.isna(current_sector['MA30_Slope']) else 0
+                            
+                            sector_price_above_ma = sector_close > sector_ma30
+                            sector_ma_slope_positive = sector_ma30_slope > 0
+                            
+                            if sector_price_above_ma and sector_ma_slope_positive:
+                                sector_phase = 2  # Uptrend
+                            elif sector_price_above_ma and not sector_ma_slope_positive:
+                                sector_phase = 3  # Top formation
+                            elif not sector_price_above_ma and not sector_ma_slope_positive:
+                                sector_phase = 4  # Downtrend
+                            else:
+                                sector_phase = 1  # Base formation
+                            
+                            # Get sector performance metrics
+                            if len(sector_data) >= 4:
+                                sector_1month_perf = (float(sector_data['Close'].iloc[-1]) / float(sector_data['Close'].iloc[-4]) - 1) * 100
+                            else:
+                                sector_1month_perf = 0
+                            
+                            # Calculate relative strength vs market
+                            if len(market_data) == len(sector_data):
+                                relative_strength = (float(sector_data['Close'].iloc[-1]) / float(sector_data['Close'].iloc[0])) / \
+                                                   (float(market_data['Close'].iloc[-1]) / float(market_data['Close'].iloc[0])) * 100 - 100
+                            else:
+                                # Handle mismatched lengths by using common date range
+                                logger.warning("Market and sector data lengths don't match. Using common date range for RS calculation.")
+                                common_start = max(market_data.index[0], sector_data.index[0])
+                                common_end = min(market_data.index[-1], sector_data.index[-1])
                                 
-                                # Calculate relative strength vs market
-                                if len(market_data) == len(sector_data):
-                                    relative_strength = (sector_data['Close'].iloc[-1] / sector_data['Close'].iloc[0]) / \
-                                                       (market_data['Close'].iloc[-1] / market_data['Close'].iloc[0]) * 100 - 100
+                                market_start = float(market_data.loc[market_data.index >= common_start, 'Close'].iloc[0])
+                                market_end = float(market_data.loc[market_data.index <= common_end, 'Close'].iloc[-1])
+                                sector_start = float(sector_data.loc[sector_data.index >= common_start, 'Close'].iloc[0])
+                                sector_end = float(sector_data.loc[sector_data.index <= common_end, 'Close'].iloc[-1])
+                                
+                                market_perf = market_end / market_start
+                                sector_perf = sector_end / sector_start
+                                
+                                if market_perf > 0:
+                                    relative_strength = (sector_perf / market_perf) * 100 - 100
                                 else:
                                     relative_strength = 0
-                                
-                                # Store sector context
-                                self.sector_data = {
-                                    'name': sector,
-                                    'etf': sector_etf,
-                                    'phase': sector_phase,
-                                    'last_close': float(sector_data['Close'].iloc[-1]),
-                                    'performance_1month': sector_1month_perf,
-                                    'relative_strength': relative_strength
-                                }
-                                
-                                logger.info(f"Sector data loaded: {sector} (Phase {sector_phase})")
-                
+                            
+                            # Store sector context
+                            self.sector_data = {
+                                'name': sector,
+                                'etf': sector_etf,
+                                'phase': sector_phase,
+                                'last_close': float(sector_data['Close'].iloc[-1]),
+                                'performance_1month': sector_1month_perf,
+                                'relative_strength': relative_strength
+                            }
+                            
+                            logger.info(f"Sector data loaded: {sector} (Phase {sector_phase})")
+                        else:
+                            logger.warning(f"Downloaded empty dataset for sector ETF {sector_etf}")
+                            self.sector_data = None
+                    else:
+                        logger.warning(f"Skipping sector analysis for {self.ticker_symbol}: no valid sector or ETF determined")
+                        self.sector_data = None
+                        
                 except Exception as e:
-                    logger.warning(f"Could not load sector data: {str(e)}")
+                    logger.error(f"Error in sector analysis: {str(e)}")
+                    logger.error(traceback.format_exc())
                     self.sector_data = None
             else:
                 logger.warning("No market context data available")
@@ -1780,8 +2027,7 @@ class WeinsteinTickerAnalyzer:
             
             # Ensure all bins are represented
             all_bins = {i: volume_by_price.get(i, 0) for i in range(num_bins)}
-            
-            # Calculate bin midpoints for y-values
+# Calculate bin midpoints for y-values
             y_values = [min_price + ((i + 0.5) * bin_size) for i in range(num_bins)]
             
             # Create volume profile chart
