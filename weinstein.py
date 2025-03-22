@@ -2006,7 +2006,6 @@ class WeinsteinTickerAnalyzer:
                         volume_by_price[bin_idx] = volume_per_bin
             
             # Ensure all bins are represented
-# Ensure all bins are represented
             all_bins = {i: volume_by_price.get(i, 0) for i in range(num_bins)}
             
             # Calculate bin midpoints for y-values
@@ -2120,6 +2119,29 @@ class WeinsteinTickerAnalyzer:
             }
         
         try:
+            # Überprüfe, ob die erforderlichen Indikatoren vorhanden sind
+            required_indicators = ['MA30', 'MA30_Slope', 'RSI']
+            missing_indicators = [ind for ind in required_indicators if ind not in self.data.columns]
+            
+            if missing_indicators:
+                logger.warning(f"Fehlende Indikatoren für Backtest: {', '.join(missing_indicators)}")
+                # Berechne fehlende Indikatoren
+                if 'MA30' not in self.data.columns:
+                    self.data['MA30'] = self.data['Close'].rolling(window=min(30, len(self.data))).mean()
+                    
+                if 'MA30_Slope' not in self.data.columns:
+                    self.data['MA30_Slope'] = self.data['MA30'].diff()
+                    
+                if 'RSI' not in self.data.columns:
+                    # Berechne RSI
+                    delta = self.data['Close'].diff()
+                    gain = delta.where(delta > 0, 0).rolling(window=min(14, len(self.data)//2)).mean()
+                    loss = -delta.where(delta < 0, 0).rolling(window=min(14, len(self.data)//2)).mean()
+                    loss = loss.replace(0, np.nan)
+                    rs = gain / loss
+                    rs = rs.fillna(0)
+                    self.data['RSI'] = 100 - (100 / (1 + rs))
+            
             # Feste Parameter
             initial_capital = 100000.0
             position_size_pct = 0.9
@@ -2151,16 +2173,32 @@ class WeinsteinTickerAnalyzer:
             stop_level = 0
             trades = []
             
-            # Hauptschleife: Durchlaufe jeden Datenpunkt ab dem 30. Tag
-            for i in range(30, len(df)):
+            # Hauptschleife: Durchlaufe jeden Datenpunkt ab dem 30. Tag oder dem frühestmöglichen
+            start_idx = min(30, len(df) - 10)  # Stelle sicher, dass wir mind. 10 Handelsperioden haben
+            
+            for i in range(start_idx, len(df)):
                 # Historische Daten bis zum aktuellen Tag (exklusiv)
                 hist_window = df.iloc[:i]
                 current_day = df.iloc[i]
                 current_date = df.index[i]
-                current_price = float(current_day['Close'])
                 
-                # Tagestiefststand für Stop-Loss-Prüfung
-                day_low = float(self.get_safe_series(df, 'Low').iloc[i])
+                # Sicherer Zugriff auf Close-Wert
+                try:
+                    current_price = float(current_day['Close'])
+                    if pd.isna(current_price):
+                        continue  # Überspringe Daten mit NaN-Werten
+                except Exception as e:
+                    logger.warning(f"Fehler beim Zugriff auf Close-Preis: {str(e)}")
+                    continue
+                
+                # Tagestiefststand für Stop-Loss-Prüfung (mit Fallback)
+                try:
+                    day_low = float(self.get_safe_series(df, 'Low').iloc[i])
+                    if pd.isna(day_low):
+                        day_low = current_price * 0.99  # Fallback: 1% unter Close
+                except Exception as e:
+                    logger.warning(f"Fehler beim Zugriff auf Low-Preis: {str(e)}")
+                    day_low = current_price * 0.99  # Fallback
                 
                 # Phase und Signal identifizieren
                 phase = self._determine_historical_phase(hist_window, current_day)
@@ -2172,8 +2210,11 @@ class WeinsteinTickerAnalyzer:
                 
                 # Trading-Logik (Ein- und Ausstieg)
                 if not in_position:
-                    # Auf Kaufsignale prüfen
-                    if 'KAUF' in signal or 'KAUFEN' in signal or ('AKKUMULIEREN' in signal and phase == 1):
+                    # Auf Kaufsignale prüfen - mit erweiterten Bedingungen
+                    if ('KAUF' in signal or 'KAUFEN' in signal or 
+                        'AKKUMULIEREN' in signal or 
+                        (phase == 2 and 'BEOBACHTEN' not in signal and 'NEUTRAL' not in signal)):  # In Phase 2 kaufen
+                        
                         # Positionsgröße berechnen
                         cash = results.loc[current_date, 'Cash']
                         position_value = cash * position_size_pct
@@ -2258,16 +2299,71 @@ class WeinsteinTickerAnalyzer:
                         if new_stop > stop_level:
                             stop_level = new_stop
                             results.loc[current_date, 'Stop_Loss'] = stop_level
-                
+            
                 # Depotwert berechnen (Cash + Positionswert)
                 position_value = results.loc[current_date, 'Anteile'] * current_price
                 results.loc[current_date, 'Depotwert'] = results.loc[current_date, 'Cash'] + position_value
                 results.loc[current_date, 'Position'] = 1 if in_position else 0
             
+            # Letzten Trade schließen falls noch offen (damit wir einen aussagekräftigen Vergleich haben)
+            if in_position:
+                last_date = df.index[-1]
+                last_price = float(df['Close'].iloc[-1])
+                
+                # Gewinn/Verlust berechnen
+                trade_profit_pct = (last_price / entry_price - 1) * 100
+                trade_profit = shares_held * (last_price - entry_price)
+                
+                # Portfolio aktualisieren
+                results.loc[last_date, 'Cash'] += shares_held * last_price
+                results.loc[last_date, 'Anteile'] = 0
+                results.loc[last_date, 'Trade_Ende'] = True
+                
+                # Trade protokollieren
+                trade = {
+                    'Einstiegsdatum': entry_date,
+                    'Einstiegspreis': entry_price,
+                    'Ausstiegsdatum': last_date,
+                    'Ausstiegspreis': last_price,
+                    'Grund': "Ende des Testzeitraums",
+                    'Anteile': shares_held,
+                    'Gewinn_Prozent': trade_profit_pct,
+                    'Gewinn_USD': trade_profit,
+                    'Haltedauer': (last_date - entry_date).days
+                }
+                trades.append(trade)
+                
+                logger.info(f"BACKTEST: {last_date} - LETZTER TRADE GESCHLOSSEN {shares_held:.2f} Anteile zu ${last_price:.2f}, Gewinn: {trade_profit_pct:.2f}%")
+                
+                # Finalen Depotwert aktualisieren
+                results.loc[last_date, 'Depotwert'] = results.loc[last_date, 'Cash']
+            
+            # Überprüfen ob Trades stattgefunden haben
+            if len(trades) == 0:
+                logger.warning("Keine Trades im Backtest-Zeitraum generiert")
+                return {
+                    "success": False,
+                    "error": "Keine Trades wurden im Backtest-Zeitraum generiert. Versuchen Sie einen längeren Zeitraum oder eine andere Aktie."
+                }
+            
             # Performance-Metriken berechnen
             final_equity = results['Depotwert'].iloc[-1]
             total_return = (final_equity / initial_capital - 1) * 100
-            buy_hold_return = (self.get_safe_series(df, 'Close').iloc[-1] / self.get_safe_series(df, 'Close').iloc[30] - 1) * 100
+            
+            # Buy & Hold Berechnung robuster machen
+            try:
+                # Verwende den ersten und letzten verfügbaren Preis ohne NaN
+                valid_close = self.get_safe_series(df, 'Close').dropna()
+                if len(valid_close) >= 2:
+                    first_valid_close = valid_close.iloc[min(start_idx, len(valid_close)-1)]
+                    last_valid_close = valid_close.iloc[-1]
+                    buy_hold_return = (last_valid_close / first_valid_close - 1) * 100
+                else:
+                    buy_hold_return = 0
+                    logger.warning("Nicht genügend gültige Daten für Buy & Hold Berechnung")
+            except Exception as e:
+                logger.error(f"Fehler bei Buy & Hold Berechnung: {str(e)}")
+                buy_hold_return = 0
             
             # Drawdown berechnen
             equity_series = results['Depotwert']
@@ -2317,24 +2413,56 @@ class WeinsteinTickerAnalyzer:
             }
 
     def _determine_historical_phase(self, hist_data, current_day):
-        """Vereinfachte Funktion zur Ermittlung der Weinstein-Phase basierend auf historischen Daten"""
+        """Verbesserte Funktion zur Ermittlung der Weinstein-Phase"""
         try:
-            # Sichere Extraktion der Indikatorwerte
-            close_value = float(current_day['Close'])
+            # Sichere Extraktion der Werte mit Fallbacks
+            try:
+                close_value = float(current_day['Close'])
+            except:
+                # Versuche alternativen Zugriff
+                if isinstance(current_day['Close'], pd.Series):
+                    close_value = float(current_day['Close'].iloc[0])
+                else:
+                    # Letzter Ausweg
+                    close_value = float(self.data['Close'].iloc[-1])
             
-            # MA-Werte holen (kritisch für die Phasenidentifikation)
-            ma30_value = float(current_day['MA30']) if 'MA30' in current_day else None
-            ma30_slope = float(current_day['MA30_Slope']) if 'MA30_Slope' in current_day else 0
-            
-            # Wenn keine MA30 verfügbar, können wir keine genaue Phase bestimmen
-            if ma30_value is None:
-                return 0
-            
-            # Grundbedingungen nach Weinstein berechnen
+            # MA30 mit Fallback
+            try:
+                if 'MA30' in current_day:
+                    ma30_value = float(current_day['MA30'])
+                elif 'MA10' in current_day:
+                    # Verwende MA10 als Ersatz
+                    ma30_value = float(current_day['MA10'])
+                else:
+                    # Berechne temporären Durchschnitt
+                    ma30_window = min(30, len(hist_data))
+                    ma30_value = hist_data['Close'].tail(ma30_window).mean()
+            except:
+                # Fallback - MA30 als 95% des aktuellen Kurses
+                ma30_value = close_value * 0.95
+                
+            # MA30_Slope mit Fallback
+            try:
+                if 'MA30_Slope' in current_day:
+                    ma30_slope = float(current_day['MA30_Slope'])
+                elif 'MA10_Slope' in current_day:
+                    ma30_slope = float(current_day['MA10_Slope'])
+                else:
+                    # Berechne temporär einen einfachen Slope
+                    if len(hist_data) >= 2:
+                        last_close = hist_data['Close'].iloc[-1]
+                        prev_close = hist_data['Close'].iloc[-2]
+                        ma30_slope = last_close - prev_close
+                    else:
+                        ma30_slope = 0
+            except:
+                # Fallback zu neutralem Trend
+                ma30_slope = 0
+                
+            # Weinstein-Phasenbestimmung
             price_above_ma30 = close_value > ma30_value
             ma30_slope_positive = ma30_slope > 0
             
-            # Vereinfachte Phasenbestimmung
             if price_above_ma30 and ma30_slope_positive:
                 phase = 2  # Aufwärtstrend
             elif not price_above_ma30 and not ma30_slope_positive:
@@ -2343,35 +2471,64 @@ class WeinsteinTickerAnalyzer:
                 phase = 3  # Topbildung
             else:
                 phase = 1  # Bodenbildung
-                
+                    
             return phase
-            
+                
         except Exception as e:
             logger.error(f"Fehler bei der historischen Phasenidentifikation: {str(e)}")
-            return 0
+            # Fallback zu Phase 1 (Bodenbildung) als sicherer Default
+            return 1
 
     def _generate_signal_from_phase(self, phase, current_day):
-        """Generiert ein Handelssignal basierend auf der Phase und aktuellen Indikatoren"""
+        """Verbesserte Funktion zur Signalgenerierung mit Fallbacks"""
         try:
-            # Standardsignale je nach Phase
+            # Erweiterte Signale basierend auf Phase
             if phase == 2:  # Aufwärtstrend
-                return "KAUFEN - Aufwärtstrend"
+                # Prüfe ob wir uns in einem starken Aufwärtstrend befinden
+                try:
+                    rsi = float(current_day['RSI']) if 'RSI' in current_day else 60
+                    vol_ratio = float(current_day['Vol_Ratio']) if 'Vol_Ratio' in current_day else 1.0
+                    
+                    if rsi > 70:
+                        return "VERKAUFEN - Überkauft"
+                    elif rsi > 60 and vol_ratio > 1.2:
+                        return "KAUFEN - Starker Aufwärtstrend"
+                    else:
+                        return "KAUFEN - Aufwärtstrend"
+                except:
+                    return "KAUFEN - Aufwärtstrend"
+                    
             elif phase == 1:  # Bodenbildung
-                # Späte Bodenbildung mit positiven Indikatoren kaufen
-                rsi = float(current_day['RSI']) if 'RSI' in current_day else 0
+                # Versuche RSI zu verwenden für bessere Signale
+                try:
+                    if 'RSI' in current_day:
+                        if isinstance(current_day['RSI'], pd.Series):
+                            rsi = float(current_day['RSI'].iloc[0])
+                        else:
+                            rsi = float(current_day['RSI'])
+                    else:
+                        rsi = 45
+                except:
+                    rsi = 45
+                    
                 if rsi > 50:
                     return "AKKUMULIEREN - Späte Bodenbildung"
                 return "BEOBACHTEN - Bodenbildung"
+                
             elif phase == 3:  # Topbildung
                 return "VERKAUFEN - Topbildung"
+                
             elif phase == 4:  # Abwärtstrend
                 return "VERMEIDEN - Abwärtstrend"
+                
             else:
-                return "NEUTRAL"
-            
+                # Unbekannte Phase - neutrales Signal
+                return "NEUTRAL - Unklare Phase"
+                
         except Exception as e:
             logger.error(f"Fehler bei der Signalgenerierung: {str(e)}")
-            return "NEUTRAL"
+            # Fallback zu neutralem Signal
+            return "NEUTRAL - Fehler bei Signalgenerierung"
 
     def create_simplified_backtest_charts(self, backtest_results):
         """Erzeugt vereinfachte Charts für die Backtesting-Ergebnisse"""
