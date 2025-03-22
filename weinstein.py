@@ -1426,18 +1426,35 @@ class WeinsteinTickerAnalyzer:
             # Find closest support and resistance levels
             levels_text = ""
             if self.support_resistance_levels:
+                # Filtern der Ebenen
                 resistance_levels = [level for level in self.support_resistance_levels if level['type'] == 'resistance']
                 support_levels = [level for level in self.support_resistance_levels if level['type'] == 'support']
                 
+                # Suche nach dem nächsten Resistance-Level
                 if resistance_levels and self.last_price:
                     nearest_resistance = min(resistance_levels, key=lambda x: abs(x['price'] - self.last_price))
                     resistance_pct = (nearest_resistance['price'] - self.last_price) / self.last_price * 100
-                    levels_text += f"The nearest resistance is at ${nearest_resistance['price']:.2f} (+{resistance_pct:.1f}%). "
+                    
+                    # Dynamische Vorzeichenbehandlung
+                    if resistance_pct >= 0:
+                        direction_symbol = "+"
+                    else:
+                        direction_symbol = "-"
+                        
+                    levels_text += f"The nearest resistance is at ${nearest_resistance['price']:.2f} ({direction_symbol}{abs(resistance_pct):.1f}%). "
                 
+                # Suche nach dem nächsten Support-Level
                 if support_levels and self.last_price:
                     nearest_support = min(support_levels, key=lambda x: abs(x['price'] - self.last_price))
                     support_pct = (self.last_price - nearest_support['price']) / self.last_price * 100
-                    levels_text += f"The nearest support is at ${nearest_support['price']:.2f} (-{support_pct:.1f}%)."
+                    
+                    # Dynamische Vorzeichenbehandlung
+                    if support_pct >= 0:
+                        direction_symbol = "-"  # Support liegt unter dem aktuellen Preis
+                    else:
+                        direction_symbol = "+"  # Ungewöhnlicher Fall: Support liegt über dem aktuellen Preis
+                        
+                    levels_text += f"The nearest support is at ${nearest_support['price']:.2f} ({direction_symbol}{abs(support_pct):.1f}%)."
             
             # Phase-specific analysis
             phase_analysis = ""
@@ -2015,7 +2032,7 @@ class WeinsteinTickerAnalyzer:
                 low_bin = max(0, int((bar_low - min_price) / bin_size))
                 high_bin = min(num_bins - 1, int((bar_high - min_price) / bin_size))
                 
-                # Evenly distribute volume across bins (could be weighted by time spent at each price)
+# Evenly distribute volume across bins (could be weighted by time spent at each price)
                 bins_spanned = max(1, high_bin - low_bin + 1)
                 volume_per_bin = bar_volume / bins_spanned
                 
@@ -2027,7 +2044,8 @@ class WeinsteinTickerAnalyzer:
             
             # Ensure all bins are represented
             all_bins = {i: volume_by_price.get(i, 0) for i in range(num_bins)}
-# Calculate bin midpoints for y-values
+            
+            # Calculate bin midpoints for y-values
             y_values = [min_price + ((i + 0.5) * bin_size) for i in range(num_bins)]
             
             # Create volume profile chart
