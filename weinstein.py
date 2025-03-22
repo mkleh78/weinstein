@@ -247,6 +247,32 @@ class WeinsteinTickerAnalyzer:
             return True
             
         return False
+
+    def get_safe_series(self, df, column):
+        """
+        Safely extract a series from a dataframe, handling various data formats.
+        
+        Args:
+            df (pandas.DataFrame): The dataframe to extract from
+            column (str): The column name to extract
+            
+        Returns:
+            pandas.Series: The extracted series with proper numeric values
+        """
+        if column not in df.columns:
+            return pd.Series(index=df.index)
+            
+        series = df[column]
+        
+        # Convert to a standard series if it's a DataFrame
+        if isinstance(series, pd.DataFrame):
+            try:
+                series = series.iloc[:, 0]
+            except:
+                return pd.Series(index=df.index)
+        
+        # Ensure all values are numeric
+        return pd.to_numeric(series, errors='coerce')
     
     def find_sector_etf_from_csv(self, ticker_symbol):
         """
@@ -657,23 +683,10 @@ class WeinsteinTickerAnalyzer:
             df = self.data.copy()
             
             # Extract high and low series safely
-            def get_safe_series(df, column):
-                if column not in df.columns:
-                    return pd.Series(index=df.index)
-                
-                series = df[column]
-                if isinstance(series, pd.DataFrame):
-                    try:
-                        series = series.iloc[:, 0]
-                    except:
-                        return pd.Series(index=df.index)
-                
-                return pd.to_numeric(series, errors='coerce')
-            
-            high_series = get_safe_series(df, 'High')
-            low_series = get_safe_series(df, 'Low')
-            close_series = get_safe_series(df, 'Close')
-            volume_series = get_safe_series(df, 'Volume')
+            high_series = self.get_safe_series(df, 'High')
+            low_series = self.get_safe_series(df, 'Low')
+            close_series = self.get_safe_series(df, 'Close')
+            volume_series = self.get_safe_series(df, 'Volume')
             
             # Find local maxima and minima (rolling window of 5 periods)
             window = 5
@@ -798,24 +811,11 @@ class WeinsteinTickerAnalyzer:
             df = self.data.copy()
             
             # Ensure we're working with Series and not DataFrames
-            def get_safe_series(df, column):
-                if column not in df.columns:
-                    return pd.Series(index=df.index)
-                
-                series = df[column]
-                if isinstance(series, pd.DataFrame):
-                    try:
-                        series = series.iloc[:, 0]
-                    except:
-                        return pd.Series(index=df.index)
-                
-                return pd.to_numeric(series, errors='coerce')
-            
-            close_series = get_safe_series(df, 'Close')
-            open_series = get_safe_series(df, 'Open')
-            high_series = get_safe_series(df, 'High')
-            low_series = get_safe_series(df, 'Low')
-            volume_series = get_safe_series(df, 'Volume')
+            close_series = self.get_safe_series(df, 'Close')
+            open_series = self.get_safe_series(df, 'Open')
+            high_series = self.get_safe_series(df, 'High')
+            low_series = self.get_safe_series(df, 'Low')
+            volume_series = self.get_safe_series(df, 'Volume')
             
             # Get lengths for adaptive windows
             data_length = len(df)
@@ -868,6 +868,13 @@ class WeinsteinTickerAnalyzer:
             rs = rs.fillna(0)
             
             df['RSI'] = 100 - (100 / (1 + rs))
+            
+            # ATR (Average True Range) for stop loss calculation
+            tr1 = high_series - low_series
+            tr2 = abs(high_series - close_series.shift())
+            tr3 = abs(low_series - close_series.shift())
+            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            df['ATR'] = tr.rolling(window=min(14, data_length // 3)).mean()
             
             # Bollinger Bands (2 standard deviations) with adaptive window
             bb_window = min(30, max(5, data_length // 3))
@@ -1015,20 +1022,6 @@ class WeinsteinTickerAnalyzer:
         try:
             current = self.data.iloc[-1]
             
-            # Define get_safe_series function
-            def get_safe_series(df, column):
-                if column not in df.columns:
-                    return pd.Series(index=df.index)
-                
-                series = df[column]
-                if isinstance(series, pd.DataFrame):
-                    try:
-                        series = series.iloc[:, 0]
-                    except:
-                        return pd.Series(index=df.index)
-                
-                return pd.to_numeric(series, errors='coerce')
-            
             # Extract values safely and ensure we're working with scalar values
             def safe_get_value(row, column, default=0):
                 if column not in row:
@@ -1118,8 +1111,8 @@ class WeinsteinTickerAnalyzer:
                 higher_highs = True
                 higher_lows = True
                 
-                highs = get_safe_series(recent_df, 'High')
-                lows = get_safe_series(recent_df, 'Low')
+                highs = self.get_safe_series(recent_df, 'High')
+                lows = self.get_safe_series(recent_df, 'Low')
                 
                 if len(highs) >= 3 and not highs.isna().all():
                     for i in range(1, len(highs)):
@@ -1574,38 +1567,20 @@ class WeinsteinTickerAnalyzer:
                 row_heights=[0.6, 0.2, 0.2]
             )
             
-            # Extract safe series for plotting
-            def get_safe_series(df, column):
-                """Extract a safe series for plotting"""
-                if column not in df.columns:
-                    return pd.Series(index=df.index)
-                    
-                series = df[column]
-                
-                # Convert to a standard series if it's a DataFrame
-                if isinstance(series, pd.DataFrame):
-                    try:
-                        series = series.iloc[:, 0]
-                    except:
-                        return pd.Series(index=df.index)
-                
-                # Ensure all values are numeric
-                return pd.to_numeric(series, errors='coerce')
-            
             # Safe extractions
-            close = get_safe_series(self.data, 'Close')
-            open_vals = get_safe_series(self.data, 'Open')
-            high = get_safe_series(self.data, 'High')
-            low = get_safe_series(self.data, 'Low')
-            volume = get_safe_series(self.data, 'Volume')
-            ma10 = get_safe_series(self.data, 'MA10')
-            ma30 = get_safe_series(self.data, 'MA30')
-            ma50 = get_safe_series(self.data, 'MA50')
-            ma200 = get_safe_series(self.data, 'MA200')
-            volma30 = get_safe_series(self.data, 'VolMA30')
-            rsi = get_safe_series(self.data, 'RSI')
-            bband_upper = get_safe_series(self.data, 'BBand_Upper')
-            bband_lower = get_safe_series(self.data, 'BBand_Lower')
+            close = self.get_safe_series(self.data, 'Close')
+            open_vals = self.get_safe_series(self.data, 'Open')
+            high = self.get_safe_series(self.data, 'High')
+            low = self.get_safe_series(self.data, 'Low')
+            volume = self.get_safe_series(self.data, 'Volume')
+            ma10 = self.get_safe_series(self.data, 'MA10')
+            ma30 = self.get_safe_series(self.data, 'MA30')
+            ma50 = self.get_safe_series(self.data, 'MA50')
+            ma200 = self.get_safe_series(self.data, 'MA200')
+            volma30 = self.get_safe_series(self.data, 'VolMA30')
+            rsi = self.get_safe_series(self.data, 'RSI')
+            bband_upper = self.get_safe_series(self.data, 'BBand_Upper')
+            bband_lower = self.get_safe_series(self.data, 'BBand_Lower')
             
             # Add price candlestick chart
             fig.add_trace(
@@ -1940,29 +1915,11 @@ class WeinsteinTickerAnalyzer:
             else:
                 df = self.data.copy()
                 
-            # Get series with proper handling of potential multi-level data
-            def get_safe_series(df, column):
-                """Extract a safe series for plotting"""
-                if column not in df.columns:
-                    return pd.Series(index=df.index)
-                    
-                series = df[column]
-                
-                # Convert to a standard series if it's a DataFrame
-                if isinstance(series, pd.DataFrame):
-                    try:
-                        series = series.iloc[:, 0]
-                    except:
-                        return pd.Series(index=df.index)
-                
-                # Ensure all values are numeric
-                return pd.to_numeric(series, errors='coerce')
-            
             # Extract safe series for Close and Volume
-            close_series = get_safe_series(df, 'Close')
-            high_series = get_safe_series(df, 'High')
-            low_series = get_safe_series(df, 'Low')
-            volume_series = get_safe_series(df, 'Volume')
+            close_series = self.get_safe_series(df, 'Close')
+            high_series = self.get_safe_series(df, 'High')
+            low_series = self.get_safe_series(df, 'Low')
+            volume_series = self.get_safe_series(df, 'Volume')
             
             # Check for empty data after cleaning
             if close_series.isna().all() or volume_series.isna().all():
@@ -2021,7 +1978,7 @@ class WeinsteinTickerAnalyzer:
                 
             bin_size = price_range / num_bins
             
-# Calculate volume for each price bin with enhanced method
+            # Calculate volume for each price bin with enhanced method
             volume_by_price = {}
             
             # Distribute volume across the high-low range for each bar
@@ -2048,7 +2005,7 @@ class WeinsteinTickerAnalyzer:
                     else:
                         volume_by_price[bin_idx] = volume_per_bin
             
-            # Ensure all bins are represented
+# Ensure all bins are represented
             all_bins = {i: volume_by_price.get(i, 0) for i in range(num_bins)}
             
             # Calculate bin midpoints for y-values
@@ -2150,6 +2107,728 @@ class WeinsteinTickerAnalyzer:
             fig.update_layout(height=600)
             return fig
 
+    def perform_backtest(self, initial_capital=10000.0, position_size_pct=0.9, stop_loss_pct=0.07, 
+                         use_trailing_stop=True, trailing_stop_factor=3.0):
+        """
+        Backtests the Weinstein strategy on historical data.
+        
+        Args:
+            initial_capital (float): Starting capital for the backtest
+            position_size_pct (float): Percentage of capital to use per trade (0-1)
+            stop_loss_pct (float): Stop loss percentage (0-1)
+            use_trailing_stop (bool): Whether to use trailing stops
+            trailing_stop_factor (float): Factor to multiply the ATR by for trailing stops
+        
+        Returns:
+            dict: Backtest results including performance metrics and trade history
+        """
+        if self.data is None or len(self.data) < 50:  # Need reasonable amount of data
+            logger.error("Insufficient data for backtest")
+            return {
+                "success": False,
+                "error": "Insufficient data for backtest. Need at least 50 data points."
+            }
+        
+        try:
+            logger.info(f"Starting backtest for {self.ticker_symbol} with initial capital ${initial_capital}")
+            
+            # Make a copy of the data to avoid modifying original
+            df = self.data.copy()
+            
+            # Prepare results dataframe with all signals and performance
+            results = pd.DataFrame(index=df.index)
+            results['Close'] = self.get_safe_series(df, 'Close')
+            results['High'] = self.get_safe_series(df, 'High')
+            results['Low'] = self.get_safe_series(df, 'Low')
+            results['ATR'] = self.get_safe_series(df, 'ATR')
+            results['Phase'] = 0
+            results['Signal'] = 'NONE'
+            results['Position'] = 0  # 0: no position, 1: long, -1: short
+            results['Cash'] = initial_capital
+            results['Shares'] = 0
+            results['Equity'] = initial_capital
+            results['Trade_Start'] = False
+            results['Trade_End'] = False
+            results['Trade_Profit_Pct'] = 0.0
+            results['Trade_Profit_Value'] = 0.0
+            results['Stop_Loss'] = 0.0
+            results['Trailing_Stop'] = 0.0
+            
+            # Trading logic variables
+            in_position = False
+            entry_price = 0
+            entry_date = None
+            position_size = 0
+            stop_level = 0
+            trailing_stop = 0
+            trade_history = []
+            
+            # We'll use a rolling window to analyze phases on historical data
+            # Skip the first window_size data points to have enough history
+            window_size = min(30, len(df) // 4)  # Use at least 30 periods or 1/4 of data
+            
+            # Loop through each data point (starting from window_size to have enough history)
+            for i in range(window_size, len(df)):
+                # Get the historical window up to current date (exclusive of current)
+                hist_window = df.iloc[:i]
+                current_day = df.iloc[i]
+                current_date = df.index[i]
+                current_price = float(current_day['Close'])
+                
+                # Store the day's high and low for stop calculation
+                day_high = float(self.get_safe_series(df, 'High').iloc[i])
+                day_low = float(self.get_safe_series(df, 'Low').iloc[i])
+                
+                # Calculate ATR for this period if it's NaN
+                current_atr = df['ATR'].iloc[i]
+                if pd.isna(current_atr):
+                    # Calculate a simple ATR if missing
+                    tr_series = self.get_safe_series(df, 'High') - self.get_safe_series(df, 'Low')
+                    current_atr = tr_series.iloc[max(0, i-14):i].mean()
+                
+                # Identify the phase based on historical data (using same logic as main analyzer)
+                # We're using only data available up to this point (not future data)
+                phase, signal = self._identify_historical_phase_and_signal(hist_window, current_day)
+                
+                # Store phase and signal in results
+                results.loc[current_date, 'Phase'] = phase
+                results.loc[current_date, 'Signal'] = signal
+                
+                # Trading logic (entry and exit)
+                if not in_position:
+                    # Check for buy signals
+                    if 'BUY' in signal or 'ACCUMULATE' in signal:
+                        # Calculate position size
+                        cash_available = results.loc[current_date, 'Cash']
+                        position_value = cash_available * position_size_pct
+                        share_price = current_price
+                        shares_to_buy = position_value / share_price
+                        position_cost = shares_to_buy * share_price
+                        
+                        # Enter position
+                        if position_cost > 0 and shares_to_buy > 0:
+                            in_position = True
+                            entry_price = share_price
+                            entry_date = current_date
+                            position_size = shares_to_buy
+                            
+                            # Calculate initial stop loss
+                            stop_level = entry_price * (1 - stop_loss_pct)
+                            
+                            # For stronger signals, consider tighter stops
+                            if 'STRONG BUY' in signal:
+                                stop_loss_pct = stop_loss_pct * 0.8  # Tighter stop for strong conviction
+                                
+                            # Initial trailing stop same as stop loss
+                            trailing_stop = stop_level
+                            
+                            # Update portfolio
+                            results.loc[current_date, 'Cash'] -= position_cost
+                            results.loc[current_date, 'Shares'] = shares_to_buy
+                            results.loc[current_date, 'Trade_Start'] = True
+                            results.loc[current_date, 'Stop_Loss'] = stop_level
+                            results.loc[current_date, 'Trailing_Stop'] = trailing_stop
+                            
+                            logger.info(f"BACKTEST - {current_date}: BUY {shares_to_buy:.2f} shares at ${share_price:.2f}")
+                
+                else:  # In position
+                    # Update current position value
+                    position_value = results.loc[current_date, 'Shares'] * current_price
+                    
+                    # Check for exit signals
+                    exit_signal = False
+                    exit_reason = ""
+                    
+                    # Exit based on stop loss hit (using low of the day)
+                    if day_low <= stop_level:
+                        exit_signal = True
+                        exit_reason = "Stop Loss"
+                        # When stop is hit, assume exit at stop price
+                        exit_price = stop_level
+                    
+                    # Exit based on trailing stop if enabled and hit
+                    elif use_trailing_stop and day_low <= trailing_stop:
+                        exit_signal = True
+                        exit_reason = "Trailing Stop"
+                        # When trailing stop is hit, assume exit at trailing stop price
+                        exit_price = trailing_stop
+                    
+                    # Exit based on sell signals
+                    elif 'SELL' in signal or 'REDUCE' in signal or 'AVOID' in signal:
+                        exit_signal = True
+                        exit_reason = "Sell Signal"
+                        exit_price = current_price
+                    
+                    # Handle exits
+                    if exit_signal:
+                        # Calculate profit/loss
+                        trade_profit_pct = (exit_price / entry_price - 1) * 100
+                        trade_profit_value = position_size * (exit_price - entry_price)
+                        
+                        # Update portfolio
+                        results.loc[current_date, 'Cash'] += position_size * exit_price
+                        results.loc[current_date, 'Shares'] = 0
+                        results.loc[current_date, 'Trade_End'] = True
+                        results.loc[current_date, 'Trade_Profit_Pct'] = trade_profit_pct
+                        results.loc[current_date, 'Trade_Profit_Value'] = trade_profit_value
+                        
+                        # Log trade
+                        trade = {
+                            'entry_date': entry_date,
+                            'entry_price': entry_price,
+                            'exit_date': current_date,
+                            'exit_price': exit_price,
+                            'exit_reason': exit_reason,
+                            'shares': position_size,
+                            'profit_pct': trade_profit_pct,
+                            'profit_value': trade_profit_value,
+                            'holding_period': (current_date - entry_date).days
+                        }
+                        trade_history.append(trade)
+                        
+                        logger.info(f"BACKTEST - {current_date}: SELL {position_size:.2f} shares at ${exit_price:.2f} for {trade_profit_pct:.2f}% profit, reason: {exit_reason}")
+                        
+                        # Reset position variables
+                        in_position = False
+                        entry_price = 0
+                        entry_date = None
+                        position_size = 0
+                        stop_level = 0
+                        trailing_stop = 0
+                    
+                    else:
+                        # Update trailing stop if price is moving favorably
+                        if use_trailing_stop and current_price > entry_price:
+                            # New trailing stop based on ATR or a percentage of gain
+                            atr_trailing_stop = current_price - (current_atr * trailing_stop_factor)
+                            # Don't move the stop lower
+                            if atr_trailing_stop > trailing_stop:
+                                trailing_stop = atr_trailing_stop
+                                results.loc[current_date, 'Trailing_Stop'] = trailing_stop
+                
+                # Calculate equity (cash + position value)
+                position_value = results.loc[current_date, 'Shares'] * current_price
+                results.loc[current_date, 'Equity'] = results.loc[current_date, 'Cash'] + position_value
+                results.loc[current_date, 'Position'] = 1 if in_position else 0
+            
+            # Calculate performance metrics
+            final_equity = results['Equity'].iloc[-1]
+            total_return = (final_equity / initial_capital - 1) * 100
+            buy_hold_return = (self.get_safe_series(df, 'Close').iloc[-1] / self.get_safe_series(df, 'Close').iloc[window_size] - 1) * 100
+            
+            # Calculate drawdown
+            equity_series = results['Equity']
+            rolling_max = equity_series.expanding().max()
+            drawdown = 100 * ((equity_series / rolling_max) - 1)
+            max_drawdown = drawdown.min()
+            
+            # Trading statistics
+            total_trades = len(trade_history)
+            winning_trades = sum(1 for trade in trade_history if trade['profit_value'] > 0)
+            losing_trades = total_trades - winning_trades
+            win_rate = winning_trades / total_trades if total_trades > 0 else 0
+            
+            # Calculate average profit and loss
+            avg_profit_pct = sum(trade['profit_pct'] for trade in trade_history if trade['profit_value'] > 0) / winning_trades if winning_trades > 0 else 0
+            avg_loss_pct = sum(trade['profit_pct'] for trade in trade_history if trade['profit_value'] <= 0) / losing_trades if losing_trades > 0 else 0
+            
+            # Calculate average holding period
+            avg_holding_period = sum(trade['holding_period'] for trade in trade_history) / total_trades if total_trades > 0 else 0
+            
+            # Prepare annualized return
+            # Get start and end dates (from window_size onwards)
+            start_date = results.index[window_size]
+            end_date = results.index[-1]
+            years = (end_date - start_date).days / 365.25
+            
+            # Annualized return
+            annualized_return = ((1 + total_return / 100) ** (1 / years) - 1) * 100 if years > 0 else 0
+            
+            # Sharpe ratio (assuming risk-free rate of 0% for simplicity)
+            if years > 0:
+                # Calculate daily returns of equity
+                daily_returns = results['Equity'].pct_change().dropna()
+                sharpe_ratio = (daily_returns.mean() / daily_returns.std()) * (252 ** 0.5)  # Annualized Sharpe
+            else:
+                sharpe_ratio = 0
+            
+            # Compile the backtest results
+            backtest_results = {
+                "success": True,
+                "ticker": self.ticker_symbol,
+                "period": f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}",
+                "years": years,
+                "initial_capital": initial_capital,
+                "final_equity": final_equity,
+                "total_return_pct": total_return,
+                "annualized_return_pct": annualized_return,
+                "buy_hold_return_pct": buy_hold_return,
+                "max_drawdown_pct": max_drawdown,
+                "sharpe_ratio": sharpe_ratio,
+                "total_trades": total_trades,
+                "winning_trades": winning_trades,
+                "losing_trades": losing_trades,
+                "win_rate": win_rate,
+                "avg_profit_pct": avg_profit_pct,
+                "avg_loss_pct": avg_loss_pct,
+                "avg_holding_period_days": avg_holding_period,
+                "trade_history": trade_history,
+                "equity_curve": results['Equity'],
+                "trade_signals": results[['Phase', 'Signal', 'Position', 'Trade_Start', 'Trade_End', 'Trade_Profit_Pct']]
+            }
+            
+            logger.info(f"Backtest completed for {self.ticker_symbol}: {total_return:.2f}% total return, {annualized_return:.2f}% annualized")
+            return backtest_results
+            
+        except Exception as e:
+            logger.error(f"Error in backtest: {str(e)}")
+            traceback.print_exc()
+            return {
+                "success": False,
+                "error": f"Error during backtest: {str(e)}"
+            }
+
+    def _identify_historical_phase_and_signal(self, hist_data, current_day):
+        """
+        Identify the phase and generate a trading signal based on historical data.
+        This is a simplified version of the main phase identification logic,
+        designed to work with historical data points.
+        
+        Args:
+            hist_data (pd.DataFrame): Historical data up to but not including current day
+            current_day (pd.Series): Current day's data
+            
+        Returns:
+            tuple: (phase, signal) where phase is the Weinstein phase (1-4) and signal is the trading recommendation
+        """
+        try:
+            # Safe extraction of key indicators
+            def safe_get_value(row, column, default=0):
+                if column not in row:
+                    return default
+                
+                value = row[column]
+                
+                # Handle different data types
+                if isinstance(value, pd.Series):
+                    if value.empty:
+                        return default
+                    if pd.isna(value.iloc[0]):
+                        return default
+                    try:
+                        return float(value.iloc[0])
+                    except:
+                        return default
+                elif isinstance(value, pd.DataFrame):
+                    if value.empty:
+                        return default
+                    if pd.isna(value.iloc[0,0]):
+                        return default
+                    try:
+                        return float(value.iloc[0,0])
+                    except:
+                        return default
+                elif isinstance(value, bool):
+                    return value
+                elif pd.isna(value):
+                    return default
+                else:
+                    try:
+                        return float(value)
+                    except (TypeError, ValueError):
+                        return default
+            
+            # Extract key indicators for current day
+            close_value = safe_get_value(current_day, 'Close')
+            rsi_value = safe_get_value(current_day, 'RSI')
+            vol_ratio = safe_get_value(current_day, 'Vol_Ratio')
+            
+            # Get MA values - critical for phase identification
+            ma30_value = safe_get_value(current_day, 'MA30')
+            ma30_slope = safe_get_value(current_day, 'MA30_Slope')
+            ma10_value = safe_get_value(current_day, 'MA10')
+            
+            # Account for breakouts and breakdowns
+            new_breakout = bool(safe_get_value(current_day, 'New_Breakout', False))
+            breakdown = bool(safe_get_value(current_day, 'Breakdown', False))
+            
+            # Calculate basic conditions using Weinstein criteria
+            price_above_ma30 = close_value > ma30_value
+            ma10_above_ma30 = ma10_value > ma30_value
+            ma30_slope_positive = ma30_slope > 0
+            rsi_bullish = rsi_value > 50
+            
+            # Identify phase based on conditions
+            phase = 0
+            phase_desc = ""
+            
+            # Simplified phase identification
+            if price_above_ma30 and ma30_slope_positive:
+                phase = 2  # Uptrend
+                phase_desc = "Uptrend"
+                if new_breakout:
+                    phase_desc = "Uptrend - New Breakout"
+            elif not price_above_ma30 and not ma30_slope_positive:
+                phase = 4  # Downtrend
+                phase_desc = "Downtrend"
+                if breakdown:
+                    phase_desc = "Strong Downtrend - New Breakdown"
+            elif price_above_ma30 and not ma30_slope_positive:
+                phase = 3  # Top Formation
+                phase_desc = "Top Formation"
+            elif not price_above_ma30:
+                phase = 1  # Base Formation
+                phase_desc = "Base Formation"
+                if ma30_slope_positive or rsi_bullish:
+                    phase_desc = "Base Formation - Late Stage"
+                else:
+                    phase_desc = "Base Formation - Early Stage"
+            else:
+                phase = 0
+                phase_desc = "Transition Phase"
+            
+            # Generate signal based on phase and indicators
+            signal = "NONE"
+            
+            if phase == 2:  # Uptrend
+                if rsi_value > 75:
+                    signal = "REDUCE POSITION / TIGHTEN STOPS - Overbought"
+                elif new_breakout and vol_ratio > 1.5:
+                    signal = "STRONG BUY - CONFIRMED BREAKOUT"
+                elif new_breakout and vol_ratio > 1.2:
+                    signal = "BUY - BREAKOUT"
+                elif vol_ratio > 1.2 and 40 < rsi_value < 70:
+                    signal = "STRONG BUY - HEALTHY UPTREND"
+                elif vol_ratio > 1.0 and 40 < rsi_value < 70:
+                    signal = "BUY"
+                else:
+                    signal = "HOLD - UPTREND"
+                    
+            elif phase == 1:  # Base Formation
+                is_consolidating = bool(safe_get_value(current_day, 'Is_Consolidating', False))
+                if is_consolidating and rsi_value > 50 and vol_ratio > 0.8:
+                    signal = "WATCH CLOSELY - POTENTIAL BREAKOUT"
+                elif rsi_value > 45 and vol_ratio > 1.0:
+                    signal = "LIGHT ACCUMULATION - BASE BUILDING"
+                elif is_consolidating:
+                    signal = "WATCH - BASE FORMING"
+                else:
+                    signal = "MONITOR - WAIT FOR BASE COMPLETION"
+                
+            elif phase == 3:  # Top Formation
+                if rsi_value > 70:
+                    signal = "SELL / TAKE PROFITS - OVERBOUGHT"
+                elif vol_ratio > 1.2:
+                    signal = "REDUCE POSITION - DISTRIBUTION SIGNS"
+                else:
+                    signal = "TIGHTEN STOPS - TOP FORMING"
+                
+            elif phase == 4:  # Downtrend
+                if rsi_value < 30 and vol_ratio > 1.5:
+                    signal = "AVOID / POTENTIAL OVERSOLD BOUNCE"
+                else:
+                    signal = "AVOID - DOWNTREND"
+            
+            else:
+                signal = "NEUTRAL - UNCLEAR PATTERN"
+                
+            return phase, signal
+            
+        except Exception as e:
+            logger.error(f"Error in historical phase identification: {str(e)}")
+            return 0, "ERROR"
+
+    def create_backtest_charts(self, backtest_results):
+        """
+        Create interactive charts for backtest results visualization.
+        
+        Args:
+            backtest_results (dict): Backtest results from perform_backtest method
+            
+        Returns:
+            tuple: (equity_chart, trades_chart, performance_chart, drawdown_chart)
+        """
+        if not backtest_results["success"]:
+            # Create an empty chart with error message
+            fig = go.Figure()
+            fig.add_annotation(
+                text=backtest_results.get("error", "Backtest failed"),
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=20)
+            )
+            fig.update_layout(height=600)
+            return fig, fig, fig, fig
+        
+        try:
+            # Prepare data from backtest results
+            equity_curve = backtest_results['equity_curve']
+            trade_signals = backtest_results['trade_signals']
+            trade_history = backtest_results['trade_history']
+            
+            # Original price data
+            price_data = self.get_safe_series(self.data, 'Close')
+            
+            # 1. Create Equity Curve Chart
+            equity_fig = go.Figure()
+            
+            # Add equity curve
+            equity_fig.add_trace(
+                go.Scatter(
+                    x=equity_curve.index,
+                    y=equity_curve,
+                    mode='lines',
+                    name='Portfolio Equity',
+                    line=dict(color='blue', width=2)
+                )
+            )
+            
+            # Add buy-and-hold line for comparison
+            if len(price_data) >= len(equity_curve):
+                # Scale initial price to match initial capital
+                initial_capital = backtest_results['initial_capital']
+                price_subset = price_data.loc[equity_curve.index[0]:equity_curve.index[-1]]
+                scale_factor = initial_capital / price_subset.iloc[0]
+                scaled_price = price_subset * scale_factor
+                
+                equity_fig.add_trace(
+                    go.Scatter(
+                        x=scaled_price.index,
+                        y=scaled_price,
+                        mode='lines',
+                        name='Buy & Hold',
+                        line=dict(color='gray', width=1.5, dash='dash')
+                    )
+                )
+            
+            # Add trade markers
+            buy_dates = []
+            buy_values = []
+            sell_dates = []
+            sell_values = []
+            
+            for i, row in trade_signals.iterrows():
+                if row['Trade_Start']:
+                    buy_dates.append(i)
+                    buy_values.append(equity_curve.loc[i])
+                elif row['Trade_End']:
+                    sell_dates.append(i)
+                    sell_values.append(equity_curve.loc[i])
+            
+            equity_fig.add_trace(
+                go.Scatter(
+                    x=buy_dates,
+                    y=buy_values,
+                    mode='markers',
+                    name='Buy',
+                    marker=dict(symbol='triangle-up', size=10, color='green')
+                )
+            )
+            
+            equity_fig.add_trace(
+                go.Scatter(
+                    x=sell_dates,
+                    y=sell_values,
+                    mode='markers',
+                    name='Sell',
+                    marker=dict(symbol='triangle-down', size=10, color='red')
+                )
+            )
+            
+            # Update layout
+            equity_fig.update_layout(
+                title=f"Equity Curve - {backtest_results['ticker']} ({backtest_results['period']})",
+                xaxis_title="Date",
+                yaxis_title="Portfolio Value ($)",
+                height=600,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                ),
+                hovermode="x unified",
+                yaxis=dict(
+                    tickprefix="$"
+                )
+            )
+            
+            # 2. Create Trades Chart showing performance of each trade
+            trades_fig = go.Figure()
+            
+            # Extract trade data
+            if trade_history:
+                trade_nums = list(range(1, len(trade_history) + 1))
+                trade_profits = [trade['profit_pct'] for trade in trade_history]
+                trade_colors = ['green' if p > 0 else 'red' for p in trade_profits]
+                
+                trades_fig.add_trace(
+                    go.Bar(
+                        x=trade_nums,
+                        y=trade_profits,
+                        marker_color=trade_colors,
+                        text=[f"{p:.1f}%" for p in trade_profits],
+                        textposition='auto',
+                        name='Trade P&L'
+                    )
+                )
+                
+                # Add zero line
+                trades_fig.add_shape(
+                    type="line",
+                    x0=0.5,
+                    y0=0,
+                    x1=len(trade_history) + 0.5,
+                    y1=0,
+                    line=dict(
+                        color="black",
+                        width=1,
+                        dash="dash",
+                    )
+                )
+                
+                # Update layout
+                trades_fig.update_layout(
+                    title="Trade Performance by Trade Number",
+                    xaxis_title="Trade Number",
+                    yaxis_title="Profit/Loss (%)",
+                    height=400,
+                    hovermode="x",
+                    yaxis=dict(
+                        ticksuffix="%"
+                    )
+                )
+            else:
+                trades_fig.add_annotation(
+                    text="No trades were executed during the backtest period",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5,
+                    showarrow=False,
+                    font=dict(size=16)
+                )
+            
+            # 3. Create Performance Metrics Chart
+            perf_fig = go.Figure()
+            
+            # Basic metrics
+            metrics = {
+                'Total Return': f"{backtest_results['total_return_pct']:.2f}%",
+                'Annualized Return': f"{backtest_results['annualized_return_pct']:.2f}%",
+                'Buy & Hold Return': f"{backtest_results['buy_hold_return_pct']:.2f}%",
+                'Max Drawdown': f"{backtest_results['max_drawdown_pct']:.2f}%",
+                'Sharpe Ratio': f"{backtest_results['sharpe_ratio']:.2f}",
+                'Win Rate': f"{backtest_results['win_rate']*100:.1f}%",
+                'Trades': str(backtest_results['total_trades']),
+                'Avg Profit': f"{backtest_results['avg_profit_pct']:.2f}%",
+                'Avg Loss': f"{backtest_results['avg_loss_pct']:.2f}%",
+                'Avg Hold Time': f"{backtest_results['avg_holding_period_days']:.1f} days"
+            }
+            
+            # Create table
+            perf_fig.add_trace(
+                go.Table(
+                    header=dict(
+                        values=['Metric', 'Value'],
+                        fill_color='paleturquoise',
+                        align='left',
+                        font=dict(size=14)
+                    ),
+                    cells=dict(
+                        values=[
+                            list(metrics.keys()),
+                            list(metrics.values())
+                        ],
+                        fill_color=[['white', 'lightgrey'] * 5],
+                        align='left',
+                        font=dict(size=12)
+                    )
+                )
+            )
+            
+            perf_fig.update_layout(
+                title="Performance Metrics",
+                height=400,
+                margin=dict(l=0, r=0, t=40, b=0)
+            )
+            
+            # 4. Create Drawdown Chart
+            dd_fig = go.Figure()
+            
+            # Calculate drawdown from equity curve
+            equity_series = backtest_results['equity_curve']
+            rolling_max = equity_series.expanding().max()
+            drawdown = 100 * ((equity_series / rolling_max) - 1)
+            
+            dd_fig.add_trace(
+                go.Scatter(
+                    x=drawdown.index,
+                    y=drawdown,
+                    fill='tozeroy',
+                    fillcolor='rgba(255,0,0,0.2)',
+                    line=dict(color='red', width=1),
+                    name='Drawdown'
+                )
+            )
+            
+            # Add horizontal line at maximum drawdown
+            max_dd = backtest_results['max_drawdown_pct']
+            dd_fig.add_shape(
+                type="line",
+                x0=drawdown.index[0],
+                y0=max_dd,
+                x1=drawdown.index[-1],
+                y1=max_dd,
+                line=dict(
+                    color="darkred",
+                    width=1,
+                    dash="dash",
+                )
+            )
+            
+            dd_fig.add_annotation(
+                x=drawdown.index[-1],
+                y=max_dd,
+                text=f"Max Drawdown: {max_dd:.2f}%",
+                showarrow=False,
+                xanchor="right",
+                yanchor="bottom",
+                font=dict(color="darkred")
+            )
+            
+            dd_fig.update_layout(
+                title="Portfolio Drawdown",
+                xaxis_title="Date",
+                yaxis_title="Drawdown (%)",
+                height=300,
+                hovermode="x unified",
+                yaxis=dict(
+                    ticksuffix="%",
+                    autorange=False,
+                    range=[min(drawdown.min() * 1.1, -5), 2]  # Set y-axis range
+                )
+            )
+            
+            return equity_fig, trades_fig, perf_fig, dd_fig
+            
+        except Exception as e:
+            logger.error(f"Error creating backtest charts: {str(e)}")
+            traceback.print_exc()
+            
+            # Create an empty chart with error message
+            fig = go.Figure()
+            fig.add_annotation(
+                text=f"Error creating backtest charts: {str(e)}",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=12)
+            )
+            fig.update_layout(height=600)
+            return fig, fig, fig, fig
+
+
 # Streamlit app
 def main():
     # Set page config
@@ -2211,7 +2890,10 @@ def main():
         
         if success:
             # Create tabs for different analysis views
-            tabs = st.tabs(["Overview", "Chart", "Support & Resistance", "Volume Profile", "Detailed Analysis"])
+            tabs = st.tabs(["Overview", "Chart", "Support & Resistance", "Volume Profile", "Detailed Analysis", "Backtest"])
+            
+            # Get the analyzer instance from session state
+            analyzer = st.session_state.analyzer
             
             # Display overview in first tab
             with tabs[0]:
@@ -2222,7 +2904,6 @@ def main():
                 col1, col2, col3 = st.columns(3)
                 
                 # Safe extraction of ticker name
-                analyzer = st.session_state.analyzer
                 ticker_name = analyzer.ticker_info.get('longName', analyzer.ticker_info.get('shortName', analyzer.ticker_symbol))
                 
                 # Column 1: Ticker Info
@@ -2412,6 +3093,171 @@ def main():
                             st.markdown(f"### {section}")
                 else:
                     st.info("No detailed analysis available.")
+            
+            # Display backtest results in sixth tab
+            with tabs[5]:
+                st.subheader("Weinstein Strategy Backtest")
+                
+                # Backtesting Parameters
+                st.markdown("### Backtest Settings")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    initial_capital = st.number_input(
+                        "Initial Capital ($)",
+                        min_value=1000,
+                        max_value=1000000,
+                        value=10000,
+                        step=1000
+                    )
+                    
+                    position_size = st.slider(
+                        "Position Size (%)",
+                        min_value=10,
+                        max_value=100,
+                        value=90,
+                        step=5,
+                        help="Percentage of capital to invest per trade"
+                    ) / 100
+                    
+                    stop_loss = st.slider(
+                        "Stop Loss (%)",
+                        min_value=1,
+                        max_value=20,
+                        value=7,
+                        step=1,
+                        help="Percentage below entry price to set stop loss"
+                    ) / 100
+                
+                with col2:
+                    use_trailing_stop = st.checkbox(
+                        "Use Trailing Stop",
+                        value=True,
+                        help="Enable trailing stops to lock in profits"
+                    )
+                    
+                    trailing_factor = st.slider(
+                        "Trailing Stop Factor",
+                        min_value=1.0,
+                        max_value=5.0,
+                        value=3.0,
+                        step=0.5,
+                        help="Multiplier for ATR to set trailing stop distance",
+                        disabled=not use_trailing_stop
+                    )
+                
+                run_backtest = st.button(
+                    "Run Backtest",
+                    type="primary",
+                    use_container_width=True
+                )
+                
+                if run_backtest:
+                    with st.spinner("Running backtest..."):
+                        # Run the backtest with the specified parameters
+                        backtest_results = analyzer.perform_backtest(
+                            initial_capital=initial_capital,
+                            position_size_pct=position_size,
+                            stop_loss_pct=stop_loss,
+                            use_trailing_stop=use_trailing_stop,
+                            trailing_stop_factor=trailing_factor
+                        )
+                        
+                        if backtest_results["success"]:
+                            # Create backtest charts
+                            equity_chart, trades_chart, metrics_chart, drawdown_chart = analyzer.create_backtest_charts(backtest_results)
+                            
+                            # Display metrics at the top
+                            st.plotly_chart(metrics_chart, use_container_width=True)
+                            
+                            # Display strategy comparison
+                            strategy_return = backtest_results["total_return_pct"]
+                            buy_hold_return = backtest_results["buy_hold_return_pct"]
+                            strategy_color = "green" if strategy_return > buy_hold_return else "red"
+                            
+                            col1, col2, col3 = st.columns(3)
+                            
+                            with col1:
+                                st.metric(
+                                    "Strategy Return",
+                                    f"{strategy_return:.2f}%",
+                                    f"{strategy_return - buy_hold_return:.2f}% vs Buy & Hold",
+                                    delta_color=strategy_color
+                                )
+                            
+                            with col2:
+                                st.metric(
+                                    "Annualized Return",
+                                    f"{backtest_results['annualized_return_pct']:.2f}%"
+                                )
+                            
+                            with col3:
+                                st.metric(
+                                    "Max Drawdown",
+                                    f"{backtest_results['max_drawdown_pct']:.2f}%"
+                                )
+                            
+                            # Display equity chart
+                            st.subheader("Equity Curve")
+                            st.plotly_chart(equity_chart, use_container_width=True)
+                            
+                            # Display drawdown chart
+                            st.subheader("Drawdown Analysis")
+                            st.plotly_chart(drawdown_chart, use_container_width=True)
+                            
+                            # Display trade performance chart
+                            st.subheader("Trade Performance")
+                            st.plotly_chart(trades_chart, use_container_width=True)
+                            
+                            # Display trade history in expandable section
+                            with st.expander("Trade History"):
+                                # Convert trade history to DataFrame for display
+                                if backtest_results["trade_history"]:
+                                    trade_df = pd.DataFrame(backtest_results["trade_history"])
+                                    
+                                    # Format columns
+                                    trade_df["entry_date"] = pd.to_datetime(trade_df["entry_date"])
+                                    trade_df["exit_date"] = pd.to_datetime(trade_df["exit_date"])
+                                    
+                                    # Rename columns for better display
+                                    trade_df = trade_df.rename(columns={
+                                        "entry_date": "Entry Date",
+                                        "entry_price": "Entry Price",
+                                        "exit_date": "Exit Date",
+                                        "exit_price": "Exit Price",
+                                        "exit_reason": "Exit Reason",
+                                        "shares": "Shares",
+                                        "profit_pct": "Profit %",
+                                        "profit_value": "Profit $",
+                                        "holding_period": "Days Held"
+                                    })
+                                    
+                                    # Format price and profit columns
+                                    trade_df["Entry Price"] = trade_df["Entry Price"].map("${:.2f}".format)
+                                    trade_df["Exit Price"] = trade_df["Exit Price"].map("${:.2f}".format)
+                                    trade_df["Profit %"] = trade_df["Profit %"].map("{:.2f}%".format)
+                                    trade_df["Profit $"] = trade_df["Profit $"].map("${:.2f}".format)
+                                    
+                                    # Apply conditional formatting
+                                    def highlight_profit(row):
+                                        profit = row["Profit %"]
+                                        profit_value = float(profit.replace("%", ""))
+                                        if profit_value > 0:
+                                            return ["background-color: rgba(0,255,0,0.1)" if col == "Profit %" else "" for col in row.index]
+                                        elif profit_value < 0:
+                                            return ["background-color: rgba(255,0,0,0.1)" if col == "Profit %" else "" for col in row.index]
+                                        return ["" for _ in row.index]
+                                    
+                                    # Display styled DataFrame
+                                    st.dataframe(
+                                        trade_df.style.apply(highlight_profit, axis=1),
+                                        use_container_width=True
+                                    )
+                                else:
+                                    st.info("No trades were executed during the backtest period.")
+                        else:
+                            st.error(f"Backtest failed: {backtest_results.get('error', 'Unknown error')}")
         else:
             # Show error message if analysis failed
             if st.session_state.analyzer.errors:
